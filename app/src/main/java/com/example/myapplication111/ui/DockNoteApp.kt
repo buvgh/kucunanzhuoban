@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -29,6 +30,21 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Inventory
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Payments
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import android.widget.Toast
+import com.example.myapplication111.util.BackupManager
+import com.example.myapplication111.util.ExportManager
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.KeyboardType
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -40,6 +56,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -54,6 +71,8 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -81,6 +100,10 @@ import com.example.myapplication111.data.DayDetailUi
 import com.example.myapplication111.data.DayPhotoEntity
 import com.example.myapplication111.data.FeeRecordEntity
 import com.example.myapplication111.data.FeeTypes
+import com.example.myapplication111.data.PaymentRecordEntity
+import androidx.compose.material3.contentColorFor
+import androidx.compose.material3.rememberDatePickerState
+import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.ProjectOverviewUi
 import com.example.myapplication111.data.ProjectSummaryUi
 import com.example.myapplication111.data.StorageRecordEntity
@@ -121,12 +144,20 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
 
     var showProjectDialog by rememberSaveable { mutableStateOf(false) }
     var showStorageDialog by rememberSaveable { mutableStateOf(false) }
+    var showOutboundDialog by rememberSaveable { mutableStateOf(false) }
     var showFeeDialog by rememberSaveable { mutableStateOf(false) }
+    var showPaymentDialog by rememberSaveable { mutableStateOf(false) }
     var showDatePickerDialog by rememberSaveable { mutableStateOf(false) }
     var editingStorage by remember { mutableStateOf<StorageRecordEntity?>(null) }
+    var editingOutbound by remember { mutableStateOf<OutboundRecordEntity?>(null) }
     var editingFee by remember { mutableStateOf<FeeRecordEntity?>(null) }
+    var editingPayment by remember { mutableStateOf<PaymentRecordEntity?>(null) }
+
+    var selectedDayTab by rememberSaveable { mutableStateOf(0) }
 
     val itemNames by viewModel.uniqueItemNames.collectAsState()
+
+    var showBackupDialog by rememberSaveable { mutableStateOf(false) }
 
     val title = when (destinationRoute) {
         Routes.ProjectList -> "库存管理"
@@ -135,6 +166,8 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         Routes.Camera -> "拍照"
         else -> "库存管理"
     }
+
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -156,6 +189,9 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                     }
                 },
                 actions = {
+                    IconButton(onClick = { showBackupDialog = true }) {
+                        Icon(Icons.Default.Settings, contentDescription = "备份管理")
+                    }
                     IconButton(onClick = { viewModel.toggleDarkMode() }) {
                         Icon(
                             imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
@@ -163,7 +199,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         )
                     }
                 },
-                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     titleContentColor = MaterialTheme.colorScheme.onSurface,
                 )
@@ -172,15 +208,53 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         floatingActionButton = {
             when (destinationRoute) {
                 Routes.DayDetail -> {
-                    FloatingActionButton(
-                        onClick = {
-                            editingStorage = null
-                            showStorageDialog = true
-                        },
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
-                    ) {
-                        Icon(Icons.Default.Add, "入库")
+                    val fabColor = when (selectedDayTab) {
+                        2 -> MaterialTheme.colorScheme.secondary
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+                    val fabIcon = when (selectedDayTab) {
+                        3 -> Icons.Default.Payments
+                        4 -> Icons.Default.Add // Photos handled differently maybe?
+                        else -> Icons.Default.Add
+                    }
+                    
+                    if (selectedDayTab != 0 && selectedDayTab != 4) {
+                        FloatingActionButton(
+                            onClick = {
+                                when (selectedDayTab) {
+                                    1 -> {
+                                        editingStorage = null
+                                        showStorageDialog = true
+                                    }
+                                    2 -> {
+                                        editingOutbound = null
+                                        showOutboundDialog = true
+                                    }
+                                    3 -> {
+                                        editingFee = null
+                                        showFeeDialog = true
+                                    }
+                                }
+                            },
+                            containerColor = fabColor,
+                            contentColor = contentColorFor(fabColor)
+                        ) {
+                            Icon(fabIcon, contentDescription = null)
+                        }
+                    } else if (selectedDayTab == 4) {
+                        FloatingActionButton(
+                            onClick = {
+                                val projectId = currentProjectId
+                                val dateId = currentDateId
+                                if (projectId != null && dateId != null) {
+                                    navController.navigate(Routes.camera(projectId, dateId))
+                                }
+                            },
+                            containerColor = MaterialTheme.colorScheme.tertiary,
+                            contentColor = MaterialTheme.colorScheme.onTertiary
+                        ) {
+                            Icon(Icons.Default.Add, "拍照")
+                        }
                     }
                 }
                 Routes.ProjectOverview -> {
@@ -238,6 +312,15 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                                 navController.popBackStack(Routes.ProjectList, false)
                             },
                             onDeleteDate = { dateId -> viewModel.deleteDate(dateId) },
+                            onAddPayment = {
+                                editingPayment = null
+                                showPaymentDialog = true
+                            },
+                            onEditPayment = {
+                                editingPayment = it
+                                showPaymentDialog = true
+                            },
+                            onDeletePayment = viewModel::deletePaymentRecord
                         )
                     }
                 }
@@ -254,12 +337,19 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                     } else {
                         DayDetailScreen(
                             detail = detail,
+                            selectedTab = selectedDayTab,
+                            onTabSelected = { selectedDayTab = it },
                             onDeletePhoto = viewModel::deleteDayPhoto,
                             onEditStorage = {
                                 editingStorage = it
                                 showStorageDialog = true
                             },
                             onDeleteStorage = viewModel::deleteStorageRecord,
+                            onEditOutbound = {
+                                editingOutbound = it
+                                showOutboundDialog = true
+                            },
+                            onDeleteOutbound = viewModel::deleteOutboundRecord,
                             onEditFee = {
                                 editingFee = it
                                 showFeeDialog = true
@@ -275,6 +365,12 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                             onAddFee = {
                                 editingFee = null
                                 showFeeDialog = true
+                            },
+                            onExportCsv = {
+                                ExportManager.exportDayDetailToCsv(context, it)
+                            },
+                            onExportPdf = {
+                                ExportManager.exportDayDetailToPdf(context, it)
                             }
                         )
                     }
@@ -310,6 +406,27 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 viewModel.createProject(name)
                 showProjectDialog = false
             },
+        )
+    }
+
+    if (showBackupDialog) {
+        BackupManagementDialog(
+            onDismiss = { showBackupDialog = false },
+            onRestore = { file ->
+                viewModel.restoreBackup(file)
+                showBackupDialog = false
+            },
+            onExportAll = {
+                coroutineScope.launch {
+                    BackupManager.exportAndShareDatabase(context)
+                }
+            },
+            onDebugFill = {
+                viewModel.debugFillMockData()
+                Toast.makeText(context, "正在注入数据...", Toast.LENGTH_SHORT).show()
+                showBackupDialog = false
+            },
+            backups = BackupManager.getBackups(context)
         )
     }
 
@@ -356,6 +473,33 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         )
     }
 
+    if (showOutboundDialog && currentDayDetail != null) {
+        val detail = currentDayDetail
+        OutboundRecordDialog(
+            record = editingOutbound,
+            onDismiss = {
+                showOutboundDialog = false
+                editingOutbound = null
+            },
+            onConfirm = { name, count, weightPerUnit ->
+                if (detail != null) {
+                    val record = editingOutbound
+                    if (record == null) {
+                        viewModel.addOutboundRecord(detail.dateId, name, count, weightPerUnit)
+                    } else {
+                        viewModel.updateOutboundRecord(record, name, count, weightPerUnit)
+                    }
+                    showOutboundDialog = false
+                    editingOutbound = null
+                }
+            },
+            itemNames = itemNames,
+            onGetLastWeight = { name: String ->
+                viewModel.getLastWeightForItem(name)
+            }
+        )
+    }
+
     if (showFeeDialog && currentDayDetail != null) {
         val detail = currentDayDetail
         FeeRecordDialog(
@@ -376,6 +520,26 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                     editingFee = null
                 }
             },
+        )
+    }
+
+    if (showPaymentDialog && currentOverview != null) {
+        PaymentRecordDialog(
+            record = editingPayment,
+            onDismiss = {
+                showPaymentDialog = false
+                editingPayment = null
+            },
+            onConfirm = { amount, date, remark ->
+                val projectId = currentOverview?.id ?: return@PaymentRecordDialog
+                if (editingPayment == null) {
+                    viewModel.addPaymentRecord(projectId, amount, date, remark)
+                } else {
+                    viewModel.updatePaymentRecord(editingPayment!!, amount, date, remark)
+                }
+                showPaymentDialog = false
+                editingPayment = null
+            }
         )
     }
 }
@@ -467,6 +631,15 @@ private fun ProjectListScreen(
     onOpenProject: (Long) -> Unit,
     onDeleteProject: (Long) -> Unit,
 ) {
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    val filteredProjects = remember(projects, searchQuery) {
+        if (searchQuery.isBlank()) {
+            projects
+        } else {
+            projects.filter { it.name.contains(searchQuery, ignoreCase = true) }
+        }
+    }
+
     if (projects.isEmpty()) {
         EmptyState("还没有项目，点击右下角按钮新建一个。")
         return
@@ -484,12 +657,42 @@ private fun ProjectListScreen(
                 modifier = Modifier.padding(bottom = 8.dp)
             )
         }
-        items(projects, key = { it.id }) { project ->
-            ProjectCard(
-                project = project,
-                onClick = { onOpenProject(project.id) },
-                onDelete = { onDeleteProject(project.id) },
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("搜索项目名称...") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = {
+                    if (searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(Icons.Default.Close, "清除搜索")
+                        }
+                    }
+                },
+                shape = RoundedCornerShape(16.dp),
+                singleLine = true,
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                )
             )
+        }
+        if (filteredProjects.isEmpty()) {
+            item {
+                EmptyState("找不到匹配的项目。")
+            }
+        } else {
+            items(filteredProjects, key = { it.id }) { project ->
+                ProjectCard(
+                    project = project,
+                    onClick = { onOpenProject(project.id) },
+                    onDelete = { onDeleteProject(project.id) },
+                )
+            }
         }
     }
 }
@@ -586,6 +789,9 @@ private fun ProjectOverviewScreen(
     onOpenDate: (Long) -> Unit,
     onDeleteProject: () -> Unit,
     onDeleteDate: (Long) -> Unit,
+    onAddPayment: () -> Unit,
+    onEditPayment: (PaymentRecordEntity) -> Unit,
+    onDeletePayment: (PaymentRecordEntity) -> Unit,
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -596,16 +802,44 @@ private fun ProjectOverviewScreen(
             SummaryCard(
                 title = "项目全周期汇总",
                 totals = overview.totals,
+                isProjectTotal = true
             )
         }
+        
+        item {
+            SectionHeader("付款记录", actionLabel = "登记付款", onAction = onAddPayment)
+        }
+
+        if (overview.paymentRecords.isEmpty()) {
+            item {
+                Surface(
+                    modifier = Modifier.fillMaxWidth().height(60.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("暂无付款记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        } else {
+            items(overview.paymentRecords) { record ->
+                PaymentRecordCard(
+                    record = record,
+                    onEdit = { onEditPayment(record) },
+                    onDelete = { onDeletePayment(record) }
+                )
+            }
+        }
+
         item {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "日期记录",
+                    "每日记录",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -627,6 +861,80 @@ private fun ProjectOverviewScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun PaymentRecordCard(
+    record: PaymentRecordEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Surface(
+                modifier = Modifier.size(40.dp),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Payments,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(record.date, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                    if (record.remark.isNotBlank()) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            "(${record.remark})", 
+                            style = MaterialTheme.typography.labelSmall, 
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Text(formatCurrency(record.amount), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            }
+            Row {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, "编辑", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
+                }
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, "删除", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        DeleteConfirmDialog(
+            title = "删除付款记录",
+            message = "确定要删除这条金额为 ${formatCurrency(record.amount)} 的付款记录吗？",
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDelete()
+            },
+        )
     }
 }
 
@@ -689,16 +997,21 @@ private fun DateCard(
 @Composable
 private fun DayDetailScreen(
     detail: DayDetailUi,
+    selectedTab: Int,
+    onTabSelected: (Int) -> Unit,
     onDeletePhoto: (DayPhotoEntity) -> Unit,
     onEditStorage: (StorageRecordEntity) -> Unit,
     onDeleteStorage: (StorageRecordEntity) -> Unit,
+    onEditOutbound: (OutboundRecordEntity) -> Unit,
+    onDeleteOutbound: (OutboundRecordEntity) -> Unit,
     onEditFee: (FeeRecordEntity) -> Unit,
     onDeleteFee: (FeeRecordEntity) -> Unit,
     onTakePhoto: () -> Unit,
     onAddFee: () -> Unit,
+    onExportCsv: (DayDetailUi) -> Unit,
+    onExportPdf: (DayDetailUi) -> Unit,
 ) {
-    var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("汇总", "入库清单", "费用支出", "现场照片")
+    val tabs = listOf("汇总", "入库清单", "出库清单", "费用支出", "现场照片")
     
     var selectedFeeTab by remember { mutableStateOf(0) }
     val feeCategories = listOf("全部", FeeTypes.LABOR, FeeTypes.AGENCY, FeeTypes.LOADING, "其他")
@@ -736,7 +1049,7 @@ private fun DayDetailScreen(
             tabs.forEachIndexed { index, title ->
                 Tab(
                     selected = selectedTab == index,
-                    onClick = { selectedTab = index },
+                    onClick = { onTabSelected(index) },
                     text = { Text(title) }
                 )
             }
@@ -749,6 +1062,25 @@ private fun DayDetailScreen(
         ) {
             when (selectedTab) {
                 0 -> {
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            TextButton(onClick = { onExportCsv(detail) }) {
+                                Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("导出 CSV")
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            TextButton(onClick = { onExportPdf(detail) }) {
+                                Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("导出 PDF")
+                            }
+                        }
+                    }
                     item {
                         SummaryCard(title = "当日详细汇总", totals = detail.totals)
                     }
@@ -767,6 +1099,19 @@ private fun DayDetailScreen(
                     }
                 }
                 2 -> {
+                    if (detail.outboundRecords.isEmpty()) {
+                        item { EmptyState("暂无出库记录") }
+                    } else {
+                        items(detail.outboundRecords, key = { "outbound_${it.id}" }) { record ->
+                            OutboundRecordCard(
+                                record = record,
+                                onEdit = { onEditOutbound(record) },
+                                onDelete = { onDeleteOutbound(record) },
+                            )
+                        }
+                    }
+                }
+                3 -> {
                     item {
                         SectionHeader("费用明细", onAction = onAddFee, actionLabel = "记一笔")
                         Spacer(modifier = Modifier.height(8.dp))
@@ -823,7 +1168,7 @@ private fun DayDetailScreen(
                         }
                     }
                 }
-                3 -> {
+                4 -> {
                     item {
                         SectionHeader("现场照片", onAction = onTakePhoto, actionLabel = "去拍照")
                     }
@@ -1014,9 +1359,202 @@ private fun FeeRecordCard(
 }
 
 @Composable
+private fun OutboundRecordCard(
+    record: OutboundRecordEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Inventory,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.secondary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(record.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+                
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    InfoItem("件数", formatNumber(record.count), Modifier.weight(1f))
+                    InfoItem("单件重量", "${formatNumber(record.weightPerUnit)}斤", Modifier.weight(1f))
+                    InfoItem("时间", SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(record.timestamp)), Modifier.weight(1f))
+                }
+                
+                HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+                
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("总重计: ${formatNumber(record.count * record.weightPerUnit)} 斤", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Column(modifier = Modifier.padding(start = 8.dp)) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, "编辑", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
+                }
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, "删除", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        DeleteConfirmDialog(
+            title = "删除出库记录",
+            message = "确定要删除“${record.name}”的出库记录吗？",
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDelete()
+            },
+        )
+    }
+}
+
+@Composable
+private fun OutboundRecordDialog(
+    record: OutboundRecordEntity?,
+    itemNames: List<String>,
+    onGetLastWeight: suspend (String) -> Double?,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Double, Double) -> Unit,
+) {
+    var name by remember(record?.id) { mutableStateOf(record?.name.orEmpty()) }
+    var count by remember(record?.id) { mutableStateOf(record?.count?.toText().orEmpty()) }
+    var weightPerUnit by remember(record?.id) { mutableStateOf(record?.weightPerUnit?.toText().orEmpty()) }
+
+    var showHistory by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    val countValue = count.toDoubleOrNull()
+    val weightValue = weightPerUnit.toDoubleOrNull()
+    val canSave = name.isNotBlank() && countValue != null && weightValue != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (record == null) "登记货物出库" else "修改出库信息") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = {
+                            name = it
+                            showHistory = it.isNotBlank()
+                        },
+                        label = { Text("物品/货物名称") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        leadingIcon = { Icon(Icons.Default.Inventory, null) }
+                    )
+                    if (showHistory && itemNames.isNotEmpty()) {
+                        val filtered = itemNames.filter { it.contains(name, ignoreCase = true) }
+                        if (filtered.isNotEmpty()) {
+                            DropdownMenu(
+                                expanded = showHistory,
+                                onDismissRequest = { showHistory = false },
+                                modifier = Modifier.fillMaxWidth(0.8f),
+                                properties = PopupProperties(focusable = false)
+                            ) {
+                                filtered.forEach { historyName ->
+                                    DropdownMenuItem(
+                                        leadingIcon = { Icon(Icons.Default.History, null, modifier = Modifier.size(18.dp)) },
+                                        text = { Text(historyName) },
+                                        onClick = {
+                                            name = historyName
+                                            showHistory = false
+                                        scope.launch {
+                                            val lastWeight = onGetLastWeight(historyName)
+                                            if (lastWeight != null) {
+                                                weightPerUnit = formatNumber(lastWeight)
+                                            }
+                                        }
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                OutlinedTextField(
+                    value = count,
+                    onValueChange = { count = it },
+                    label = { Text("出库件数") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                OutlinedTextField(
+                    value = weightPerUnit,
+                    onValueChange = { weightPerUnit = it },
+                    label = { Text("单件重量(斤)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                
+                if (canSave) {
+                    val totalWeight = countValue!! * weightValue!!
+                    Surface(
+                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("预估合计", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            Text("总重: ${formatNumber(totalWeight)} 斤", 
+                                style = MaterialTheme.typography.bodyMedium, 
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name, countValue!!, weightValue!!) },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
+            ) {
+                Text("确认出库")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
 private fun SummaryCard(
     title: String,
     totals: Totals,
+    isProjectTotal: Boolean = false,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1035,8 +1573,13 @@ private fun SummaryCard(
             }
             
             Row(modifier = Modifier.fillMaxWidth()) {
-                SummaryBox("总件数", formatNumber(totals.totalCount), Modifier.weight(1f))
-                SummaryBox("总重量(斤)", formatNumber(totals.totalWeight), Modifier.weight(1f))
+                SummaryBox("入库(件/斤)", "${formatNumber(totals.totalCount)} / ${formatNumber(totals.totalWeight)}", Modifier.weight(1f))
+                SummaryBox("出库(件/斤)", "${formatNumber(totals.totalOutboundCount)} / ${formatNumber(totals.totalOutboundWeight)}", Modifier.weight(1f))
+            }
+            
+            Row(modifier = Modifier.fillMaxWidth()) {
+                SummaryBox("净库存(件)", formatNumber(totals.netTotalCount), Modifier.weight(1f))
+                SummaryBox("净库存(斤)", formatNumber(totals.netTotalWeight), Modifier.weight(1f))
             }
             
             HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))
@@ -1059,27 +1602,39 @@ private fun SummaryCard(
             }
             
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallSummaryRow("入库货值合计", formatCurrency(totals.totalStorageAmount))
+                SmallSummaryRow("果款合计", formatCurrency(totals.totalStorageAmount))
                 
-                if (totals.laborFee > 0 || totals.agencyFee > 0 || totals.loadingFee > 0 || totals.otherFee > 0) {
+                if (totals.feeSummaries.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text("费用支出细目", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f))
-                    if (totals.laborFee > 0) SmallSummaryRow(FeeTypes.LABOR, formatCurrency(totals.laborFee))
-                    if (totals.agencyFee > 0) SmallSummaryRow(FeeTypes.AGENCY, formatCurrency(totals.agencyFee))
-                    if (totals.loadingFee > 0) SmallSummaryRow(FeeTypes.LOADING, formatCurrency(totals.loadingFee))
-                    if (totals.otherFee > 0) SmallSummaryRow("其他费用", formatCurrency(totals.otherFee))
+                    totals.feeSummaries.forEach { fee ->
+                        SmallSummaryRow(fee.type, formatCurrency(fee.totalAmount))
+                    }
                 }
                 
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))
                 SmallSummaryRow("各项费用合计", formatCurrency(totals.totalFee))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("预估总成本", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
-                    val totalCost = totals.totalStorageAmount + totals.totalFee
-                    Text(formatCurrency(totalCost), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                val totalCost = totals.totalStorageAmount + totals.totalFee
+                if (isProjectTotal) {
+                    SmallSummaryRow("总应付金额", formatCurrency(totalCost))
+                    SmallSummaryRow("已付金额", formatCurrency(totals.totalPaid))
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.2f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("还欠金额", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        Text(formatCurrency(totals.totalDebt), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.error)
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("合计", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text(formatCurrency(totalCost), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
         }
@@ -1104,37 +1659,63 @@ private fun SmallSummaryRow(label: String, value: String) {
 
 @Composable
 private fun TotalsCompactText(totals: Totals) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text(
-            "件数: ${formatNumber(totals.totalCount)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "斤数: ${formatNumber(totals.totalWeight)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
-        Text(
-            "支出: ${formatCurrency(totals.totalFee)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "入: ${formatNumber(totals.totalCount)}件 / ${formatNumber(totals.totalWeight)}斤",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "出: ${formatNumber(totals.totalOutboundCount)}件",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                "存: ${formatNumber(totals.netTotalCount)}件 / ${formatNumber(totals.netTotalWeight)}斤",
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Text(
+                "支: ${formatCurrency(totals.totalFee)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 
 @Composable
 private fun EmptyState(message: String) {
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(24.dp),
-        contentAlignment = Alignment.Center,
+            .padding(48.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        Text(message, style = MaterialTheme.typography.bodyMedium)
+        Icon(
+            Icons.Default.Inbox,
+            contentDescription = null,
+            modifier = Modifier.size(64.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            message,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
     }
 }
 
@@ -1254,7 +1835,8 @@ private fun StorageRecordDialog(
                     label = { Text("入库总件数") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(
@@ -1263,7 +1845,8 @@ private fun StorageRecordDialog(
                         label = { Text("单件重量(斤)") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                     OutlinedTextField(
                         value = pricePerWeight,
@@ -1271,7 +1854,8 @@ private fun StorageRecordDialog(
                         label = { Text("单价(元/斤)") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                     )
                 }
                 
@@ -1372,7 +1956,8 @@ private fun FeeRecordDialog(
                     label = { Text("金额 (¥)") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
                 )
             }
         },
@@ -1391,6 +1976,167 @@ private fun FeeRecordDialog(
             }
         },
     )
+}
+
+@Composable
+private fun BackupManagementDialog(
+    onDismiss: () -> Unit,
+    onRestore: (File) -> Unit,
+    onExportAll: () -> Unit,
+    onDebugFill: () -> Unit,
+    backups: List<File>,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("数据备份与恢复") },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onExportAll,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Icon(Icons.Default.Share, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("导出全部数据分享")
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("本地备份记录 (最近5次)：", style = MaterialTheme.typography.labelMedium)
+                Spacer(modifier = Modifier.height(8.dp))
+                if (backups.isEmpty()) {
+                    Text("暂无备份文件", style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    LazyColumn(modifier = Modifier.heightIn(max = 300.dp)) {
+                        items(backups) { file ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                onClick = { onRestore(file) },
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(file.name, style = MaterialTheme.typography.bodyMedium)
+                                    Text(
+                                        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date(file.lastModified())),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("提示：还原备份将覆盖当前所有数据，完成后应用将自动重启。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onDebugFill,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Text("注入性能测试数据 (1000条)")
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                val context = LocalContext.current
+                val packageInfo = remember {
+                    try {
+                        context.packageManager.getPackageInfo(context.packageName, 0)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                val versionText = packageInfo?.let { "版本：${it.versionName} (${it.versionCode})" } ?: "版本：未知"
+                Text(
+                    text = versionText,
+                    modifier = Modifier.align(Alignment.End),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
+}
+
+@Composable
+private fun PaymentRecordDialog(
+    record: PaymentRecordEntity?,
+    onDismiss: () -> Unit,
+    onConfirm: (Double, String, String) -> Unit,
+) {
+    var amount by remember(record?.id) { mutableStateOf(record?.amount?.toText().orEmpty()) }
+    var date by remember(record?.id) { mutableStateOf(record?.date ?: LocalDate.now().toString()) }
+    var remark by remember(record?.id) { mutableStateOf(record?.remark.orEmpty()) }
+    var showDatePicker by remember { mutableStateOf(false) }
+
+    val amountValue = amount.toDoubleOrNull()
+    val canSave = amountValue != null && amountValue > 0
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (record == null) "登记付款" else "修改付款记录") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = amount,
+                    onValueChange = { amount = it },
+                    label = { Text("付款金额 (¥)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+                
+                OutlinedButton(
+                    onClick = { showDatePicker = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.History, null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("付款日期：$date")
+                }
+
+                OutlinedTextField(
+                    value = remark,
+                    onValueChange = { remark = it },
+                    label = { Text("备注 (可选)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(amountValue!!, date, remark) },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Text("保存付款")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+
+    if (showDatePicker) {
+        NativeDatePickerDialog(
+            onDismiss = { showDatePicker = false },
+            onConfirm = {
+                date = it
+                showDatePicker = false
+            }
+        )
+    }
 }
 
 private fun Double.toText(): String {

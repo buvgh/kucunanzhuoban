@@ -110,15 +110,21 @@ fun CameraCaptureScreen(
                 .align(Alignment.BottomCenter)
                 .padding(24.dp),
             onClick = {
-                val dir = File(context.filesDir, "dock_photos/$dateId").apply { mkdirs() }
-                val file = File(dir, "IMG_${System.currentTimeMillis()}.jpg")
+                // 使用 getExternalFilesDir 存储，并仅保存相对路径
+                val baseDir = context.getExternalFilesDir(null) ?: context.filesDir
+                val relativePath = "dock_photos/$dateId"
+                val dir = File(baseDir, relativePath).apply { mkdirs() }
+                val fileName = "IMG_${System.currentTimeMillis()}.jpg"
+                val file = File(dir, fileName)
+                
                 val outputOptions = ImageCapture.OutputFileOptions.Builder(file).build()
                 imageCapture.takePicture(
                     outputOptions,
                     executor,
                     object : ImageCapture.OnImageSavedCallback {
                         override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                            onPhotoSaved(file.absolutePath)
+                            // 只将相对路径传给 ViewModel 存入数据库
+                            onPhotoSaved("$relativePath/$fileName")
                         }
 
                         override fun onError(exception: ImageCaptureException) {

@@ -11,12 +11,18 @@ import com.example.myapplication111.data.DayDetailUi
 import com.example.myapplication111.data.DayPhotoEntity
 import com.example.myapplication111.data.ProjectOverviewUi
 import com.example.myapplication111.data.FeeRecordEntity
+import com.example.myapplication111.data.OutboundRecordEntity
+import com.example.myapplication111.data.PaymentRecordEntity
 import com.example.myapplication111.data.ProjectSummaryUi
 import com.example.myapplication111.data.StorageRecordEntity
+import com.example.myapplication111.util.BackupManager
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -27,6 +33,17 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
 
     private val _isDarkMode = MutableStateFlow(false)
     val isDarkMode: StateFlow<Boolean> = _isDarkMode.asStateFlow()
+
+    private val _restoreSuccessTrigger = MutableSharedFlow<Boolean>()
+    val restoreSuccessTrigger: SharedFlow<Boolean> = _restoreSuccessTrigger.asSharedFlow()
+
+    fun restoreBackup(file: File) {
+        viewModelScope.launch {
+            if (BackupManager.restoreBackup(getApplication(), file)) {
+                _restoreSuccessTrigger.emit(true)
+            }
+        }
+    }
 
     fun toggleDarkMode() {
         _isDarkMode.value = !_isDarkMode.value
@@ -46,22 +63,27 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     fun createProject(name: String) {
         viewModelScope.launch {
             repository.createProject(name)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun deleteProject(projectId: Long) {
         viewModelScope.launch {
             repository.deleteProject(projectId)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     suspend fun createOrGetDate(projectId: Long, date: String): Long {
-        return repository.createDate(projectId, date)
+        val dateId = repository.createDate(projectId, date)
+        BackupManager.backupDatabase(getApplication())
+        return dateId
     }
 
     fun deleteDate(dateId: Long) {
         viewModelScope.launch {
             repository.deleteDate(dateId)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
@@ -74,6 +96,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             repository.addStorageRecord(dateId, name, count, weightPerUnit, pricePerWeight)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
@@ -86,36 +109,42 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             repository.updateStorageRecord(record, name, count, weightPerUnit, pricePerWeight)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun deleteStorageRecord(record: StorageRecordEntity) {
         viewModelScope.launch {
             repository.deleteStorageRecord(record)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun addFeeRecord(dateId: Long, type: String, amount: Double) {
         viewModelScope.launch {
             repository.addFeeRecord(dateId, type, amount)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun updateFeeRecord(record: FeeRecordEntity, type: String, amount: Double) {
         viewModelScope.launch {
             repository.updateFeeRecord(record, type, amount)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun deleteFeeRecord(record: FeeRecordEntity) {
         viewModelScope.launch {
             repository.deleteFeeRecord(record)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
     fun addDayPhoto(dateId: Long, path: String) {
         viewModelScope.launch {
             repository.addDayPhoto(dateId, path)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
@@ -123,6 +152,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             runCatching { File(photo.path).delete() }
             repository.deleteDayPhoto(photo)
+            BackupManager.backupDatabase(getApplication())
         }
     }
 
@@ -135,6 +165,64 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
 
     suspend fun getLastWeightForItem(name: String): Double? {
         return repository.getLastWeightForItem(name)
+    }
+
+    fun addOutboundRecord(
+        dateId: Long,
+        name: String,
+        count: Double,
+        weightPerUnit: Double,
+    ) {
+        viewModelScope.launch {
+            repository.addOutboundRecord(dateId, name, count, weightPerUnit)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updateOutboundRecord(
+        record: OutboundRecordEntity,
+        name: String,
+        count: Double,
+        weightPerUnit: Double,
+    ) {
+        viewModelScope.launch {
+            repository.updateOutboundRecord(record, name, count, weightPerUnit)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteOutboundRecord(record: OutboundRecordEntity) {
+        viewModelScope.launch {
+            repository.deleteOutboundRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun addPaymentRecord(projectId: Long, amount: Double, date: String, remark: String) {
+        viewModelScope.launch {
+            repository.addPaymentRecord(projectId, amount, date, remark)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updatePaymentRecord(record: PaymentRecordEntity, amount: Double, date: String, remark: String) {
+        viewModelScope.launch {
+            repository.updatePaymentRecord(record, amount, date, remark)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deletePaymentRecord(record: PaymentRecordEntity) {
+        viewModelScope.launch {
+            repository.deletePaymentRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun debugFillMockData() {
+        viewModelScope.launch {
+            repository.debugFillMockData()
+        }
     }
 
     companion object {
