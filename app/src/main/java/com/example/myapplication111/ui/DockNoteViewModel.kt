@@ -6,15 +6,21 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
+import com.example.myapplication111.data.AttendanceDashboardRow
+import com.example.myapplication111.data.AttendanceEntity
+import com.example.myapplication111.data.AttendanceProjectSummary
+import com.example.myapplication111.data.AttendanceSummary
 import com.example.myapplication111.data.DockNoteRepository
 import com.example.myapplication111.data.DayDetailUi
 import com.example.myapplication111.data.DayPhotoEntity
 import com.example.myapplication111.data.ProjectOverviewUi
+import com.example.myapplication111.data.ProjectGroupSummaryUi
 import com.example.myapplication111.data.FeeRecordEntity
 import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.PaymentRecordEntity
 import com.example.myapplication111.data.ProjectSummaryUi
 import com.example.myapplication111.data.StorageRecordEntity
+import com.example.myapplication111.data.WorkerEntity
 import com.example.myapplication111.util.BackupManager
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -52,8 +58,15 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     val projectSummaries: StateFlow<List<ProjectSummaryUi>> = repository.observeProjectSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    val projectGroupSummaries: StateFlow<List<ProjectGroupSummaryUi>> = repository.observeProjectGroupSummaries()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     fun observeProjectOverview(projectId: Long): Flow<ProjectOverviewUi?> {
         return repository.observeProjectOverview(projectId)
+    }
+
+    fun observeWorkers(projectId: Long): Flow<List<WorkerEntity>> {
+        return repository.observeWorkers(projectId)
     }
 
     fun observeDayDetail(projectId: Long, dateId: Long): Flow<DayDetailUi?> {
@@ -70,6 +83,27 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     fun deleteProject(projectId: Long) {
         viewModelScope.launch {
             repository.deleteProject(projectId)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun createProjectGroup(name: String, projectIds: List<Long>) {
+        viewModelScope.launch {
+            repository.createProjectGroup(name, projectIds)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updateProjectGroup(groupId: Long, name: String, projectIds: List<Long>) {
+        viewModelScope.launch {
+            repository.updateProjectGroup(groupId, name, projectIds)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteProjectGroup(groupId: Long) {
+        viewModelScope.launch {
+            repository.deleteProjectGroup(groupId)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -215,6 +249,70 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     fun deletePaymentRecord(record: PaymentRecordEntity) {
         viewModelScope.launch {
             repository.deletePaymentRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun observeMonthlyAttendanceSummary(projectId: Long, month: String): Flow<List<AttendanceSummary>> {
+        return repository.observeMonthlyAttendanceSummary(projectId, month)
+    }
+
+    fun observeMonthlyAttendanceDashboard(projectId: Long, month: String): Flow<List<AttendanceDashboardRow>> {
+        return repository.observeMonthlyAttendanceDashboard(projectId, month)
+    }
+
+    fun observeProjectAttendanceSummaries(month: String): Flow<List<AttendanceProjectSummary>> {
+        return repository.observeProjectAttendanceSummaries(month)
+    }
+
+    fun createWorker(projectId: Long, name: String, salaryMode: Int, hourlyRate: Double, dailyRate: Double) {
+        viewModelScope.launch {
+            repository.createWorker(projectId, name, salaryMode, hourlyRate, dailyRate)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun saveAttendanceRecord(
+        projectId: Long,
+        workerId: Long,
+        date: String,
+        startTime: String?,
+        endTime: String?,
+        isPresent: Boolean,
+        hourlyRate: Double?,
+        dailyRate: Double?,
+    ) {
+        viewModelScope.launch {
+            repository.saveAttendanceRecord(projectId, workerId, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updateAttendanceRecord(
+        attendanceId: Long,
+        date: String,
+        startTime: String?,
+        endTime: String?,
+        isPresent: Boolean,
+        hourlyRate: Double?,
+        dailyRate: Double?,
+    ) {
+        viewModelScope.launch {
+            repository.updateAttendanceRecord(attendanceId, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteAttendanceRecord(record: AttendanceEntity) {
+        viewModelScope.launch {
+            repository.deleteAttendanceRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteWorker(worker: WorkerEntity) {
+        viewModelScope.launch {
+            repository.deleteWorker(worker)
             BackupManager.backupDatabase(getApplication())
         }
     }

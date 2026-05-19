@@ -1,7 +1,10 @@
 package com.example.myapplication111.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Delete
@@ -46,12 +50,13 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,6 +80,7 @@ import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -85,7 +91,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.PopupProperties
@@ -102,15 +110,19 @@ import com.example.myapplication111.data.FeeRecordEntity
 import com.example.myapplication111.data.FeeTypes
 import com.example.myapplication111.data.PaymentRecordEntity
 import androidx.compose.material3.contentColorFor
-import androidx.compose.material3.rememberDatePickerState
+import com.example.myapplication111.data.AttendanceDashboardRow
+import com.example.myapplication111.data.AttendanceEntity
+import com.example.myapplication111.data.AttendanceProjectSummary
 import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.ProjectOverviewUi
+import com.example.myapplication111.data.ProjectGroupSummaryUi
 import com.example.myapplication111.data.ProjectSummaryUi
+import com.example.myapplication111.data.SalaryMode
 import com.example.myapplication111.data.StorageRecordEntity
 import com.example.myapplication111.data.Totals
-import java.time.Instant
+import com.example.myapplication111.data.WorkerEntity
 import java.time.LocalDate
-import java.time.ZoneId
+import java.time.YearMonth
 import java.util.Locale
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -119,6 +131,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DockNoteApp(viewModel: DockNoteViewModel) {
     val projects by viewModel.projectSummaries.collectAsState()
+    val projectGroups by viewModel.projectGroupSummaries.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -148,6 +161,8 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
     var showFeeDialog by rememberSaveable { mutableStateOf(false) }
     var showPaymentDialog by rememberSaveable { mutableStateOf(false) }
     var showDatePickerDialog by rememberSaveable { mutableStateOf(false) }
+    var showProjectGroupDialog by rememberSaveable { mutableStateOf(false) }
+    var editingProjectGroup by remember { mutableStateOf<ProjectGroupSummaryUi?>(null) }
     var editingStorage by remember { mutableStateOf<StorageRecordEntity?>(null) }
     var editingOutbound by remember { mutableStateOf<OutboundRecordEntity?>(null) }
     var editingFee by remember { mutableStateOf<FeeRecordEntity?>(null) }
@@ -158,12 +173,23 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
     val itemNames by viewModel.uniqueItemNames.collectAsState()
 
     var showBackupDialog by rememberSaveable { mutableStateOf(false) }
+    var showWorkerDialog by rememberSaveable { mutableStateOf(false) }
+    var attendanceEditTarget by remember { mutableStateOf<AttendanceEditTarget?>(null) }
+    val workers by remember(currentProjectId) {
+        if (currentProjectId == null) {
+            flowOf(emptyList())
+        } else {
+            viewModel.observeWorkers(currentProjectId)
+        }
+    }.collectAsState(initial = emptyList())
 
     val title = when (destinationRoute) {
         Routes.ProjectList -> "库存管理"
         Routes.ProjectOverview -> currentOverview?.name ?: "项目总览"
         Routes.DayDetail -> currentDayDetail?.date ?: "每日详情"
         Routes.Camera -> "拍照"
+        Routes.Attendance -> "考勤看板"
+        Routes.Summary -> "汇总"
         else -> "库存管理"
     }
 
@@ -205,6 +231,43 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 )
             )
         },
+        bottomBar = {
+            if (destinationRoute != Routes.Camera) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+                    NavigationBarItem(
+                        selected = destinationRoute != Routes.Attendance && destinationRoute != Routes.Summary,
+                        onClick = {
+                            navController.navigate(Routes.ProjectList) {
+                                popUpTo(Routes.ProjectList) { inclusive = false }
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.Inventory, contentDescription = null) },
+                        label = { Text("库存") },
+                    )
+                    NavigationBarItem(
+                        selected = destinationRoute == Routes.Summary,
+                        onClick = {
+                            navController.navigate(Routes.Summary) {
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.Inbox, contentDescription = null) },
+                        label = { Text("汇总") },
+                    )
+                    NavigationBarItem(
+                        selected = destinationRoute == Routes.Attendance,
+                        onClick = {
+                            navController.navigate(Routes.Attendance) {
+                                launchSingleTop = true
+                            }
+                        },
+                        icon = { Icon(Icons.Default.History, contentDescription = null) },
+                        label = { Text("考勤") },
+                    )
+                }
+            }
+        },
         floatingActionButton = {
             when (destinationRoute) {
                 Routes.DayDetail -> {
@@ -218,7 +281,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         else -> Icons.Default.Add
                     }
                     
-                    if (selectedDayTab != 0 && selectedDayTab != 4) {
+                    if (selectedDayTab != 0 && selectedDayTab != 4 && selectedDayTab != 5) {
                         FloatingActionButton(
                             onClick = {
                                 when (selectedDayTab) {
@@ -275,6 +338,8 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         Icon(Icons.Default.Add, "新建项目")
                     }
                 }
+                Routes.Attendance -> Unit
+                Routes.Summary -> Unit
             }
         },
     ) { innerPadding ->
@@ -335,10 +400,16 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                     if (detail == null) {
                         EmptyState("日期不存在或已删除")
                     } else {
+                        val attendanceMonth = detail.date.take(7)
+                        val attendanceRows by remember(detail.projectId, attendanceMonth) {
+                            viewModel.observeMonthlyAttendanceDashboard(detail.projectId, attendanceMonth)
+                        }.collectAsState(initial = emptyList())
                         DayDetailScreen(
                             detail = detail,
                             selectedTab = selectedDayTab,
                             onTabSelected = { selectedDayTab = it },
+                            attendanceRows = attendanceRows,
+                            workers = workers,
                             onDeletePhoto = viewModel::deleteDayPhoto,
                             onEditStorage = {
                                 editingStorage = it
@@ -365,6 +436,41 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                             onAddFee = {
                                 editingFee = null
                                 showFeeDialog = true
+                            },
+                            onAddWorker = { showWorkerDialog = true },
+                            onDeleteWorker = viewModel::deleteWorker,
+                            onAddAttendanceForCell = { workerId, workerName, salaryMode, date ->
+                                val worker = workers.firstOrNull { it.id == workerId }
+                                if (worker != null) {
+                                    attendanceEditTarget = AttendanceEditTarget(
+                                        workerId = workerId,
+                                        workerName = workerName,
+                                        salaryMode = salaryMode,
+                                        date = date,
+                                        record = null,
+                                        hourlyRate = worker.hourlyRate,
+                                        dailyRate = worker.dailyRate,
+                                    )
+                                }
+                            },
+                            onEditAttendance = { workerId, workerName, salaryMode, record ->
+                                val worker = workers.firstOrNull { it.id == workerId }
+                                attendanceEditTarget = AttendanceEditTarget(
+                                    workerId = workerId,
+                                    workerName = workerName,
+                                    salaryMode = salaryMode,
+                                    date = record.date,
+                                    record = record,
+                                    hourlyRate = if (record.hourlyRateSnapshot > 0.0) record.hourlyRateSnapshot else worker?.hourlyRate ?: 0.0,
+                                    dailyRate = if (record.dailyRateSnapshot > 0.0) record.dailyRateSnapshot else worker?.dailyRate ?: 0.0,
+                                )
+                            },
+                            onDeleteAttendance = viewModel::deleteAttendanceRecord,
+                            onExportAttendanceCsv = {
+                                ExportManager.exportAttendanceBoardToCsv(context, detail.projectName, detail.date.take(7), attendanceRows)
+                            },
+                            onExportAttendancePdf = {
+                                ExportManager.exportAttendanceBoardToPdf(context, detail.projectName, detail.date.take(7), attendanceRows)
                             },
                             onExportCsv = {
                                 ExportManager.exportDayDetailToCsv(context, it)
@@ -394,6 +500,51 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                             },
                         )
                     }
+                }
+                composable(Routes.Attendance) {
+                    val month = remember { YearMonth.now().toString() }
+                    var selectedProject by remember { mutableStateOf<AttendanceProjectSummary?>(null) }
+                    val projectAttendanceSummaries by remember(month) {
+                        viewModel.observeProjectAttendanceSummaries(month)
+                    }.collectAsState(initial = emptyList())
+                    val selected = selectedProject
+                    if (selected == null) {
+                        AttendanceProjectSummaryScreen(
+                            month = month,
+                            summaries = projectAttendanceSummaries,
+                            onOpenProject = { selectedProject = it },
+                        )
+                    } else {
+                        val rows by remember(selected.projectId, month) {
+                            viewModel.observeMonthlyAttendanceDashboard(selected.projectId, month)
+                        }.collectAsState(initial = emptyList())
+                        AttendanceProjectBoardScreen(
+                            month = month,
+                            projectName = selected.projectName,
+                            rows = rows,
+                            onBack = { selectedProject = null },
+                            onExportCsv = {
+                                ExportManager.exportAttendanceBoardToCsv(context, selected.projectName, month, rows)
+                            },
+                            onExportPdf = {
+                                ExportManager.exportAttendanceBoardToPdf(context, selected.projectName, month, rows)
+                            },
+                        )
+                    }
+                }
+                composable(Routes.Summary) {
+                    ProjectGroupScreen(
+                        groups = projectGroups,
+                        onCreateGroup = {
+                            editingProjectGroup = null
+                            showProjectGroupDialog = true
+                        },
+                        onEditGroup = {
+                            editingProjectGroup = it
+                            showProjectGroupDialog = true
+                        },
+                        onDeleteGroup = { viewModel.deleteProjectGroup(it.id) },
+                    )
                 }
             }
         }
@@ -427,6 +578,26 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 showBackupDialog = false
             },
             backups = BackupManager.getBackups(context)
+        )
+    }
+
+    if (showProjectGroupDialog) {
+        ProjectGroupDialog(
+            group = editingProjectGroup,
+            projects = projects,
+            onDismiss = {
+                showProjectGroupDialog = false
+                editingProjectGroup = null
+            },
+            onConfirm = { groupId, name, projectIds ->
+                if (groupId == null) {
+                    viewModel.createProjectGroup(name, projectIds)
+                } else {
+                    viewModel.updateProjectGroup(groupId, name, projectIds)
+                }
+                showProjectGroupDialog = false
+                editingProjectGroup = null
+            },
         )
     }
 
@@ -542,6 +713,33 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             }
         )
     }
+
+    if (showWorkerDialog) {
+        WorkerDialog(
+            onDismiss = { showWorkerDialog = false },
+            onConfirm = { name, salaryMode, hourlyRate, dailyRate ->
+                val projectId = currentDayDetail?.projectId ?: return@WorkerDialog
+                viewModel.createWorker(projectId, name, salaryMode, hourlyRate, dailyRate)
+                showWorkerDialog = false
+            },
+        )
+    }
+
+    attendanceEditTarget?.let { target ->
+        AttendanceRecordDialog(
+            target = target,
+            onDismiss = { attendanceEditTarget = null },
+            onConfirm = { record, workerId, date, startTime, endTime, isPresent, hourlyRate, dailyRate ->
+                if (record == null) {
+                    val projectId = currentDayDetail?.projectId ?: return@AttendanceRecordDialog
+                    viewModel.saveAttendanceRecord(projectId, workerId, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+                } else {
+                    viewModel.updateAttendanceRecord(record.id, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+                }
+                attendanceEditTarget = null
+            },
+        )
+    }
 }
 
 private object NavArgs {
@@ -554,11 +752,23 @@ private object Routes {
     const val ProjectOverview = "project/{projectId}"
     const val DayDetail = "project/{projectId}/day/{dateId}"
     const val Camera = "project/{projectId}/day/{dateId}/camera"
+    const val Attendance = "attendance"
+    const val Summary = "summary"
 
     fun project(projectId: Long): String = "project/$projectId"
     fun day(projectId: Long, dateId: Long): String = "project/$projectId/day/$dateId"
     fun camera(projectId: Long, dateId: Long): String = "project/$projectId/day/$dateId/camera"
 }
+
+private data class AttendanceEditTarget(
+    val workerId: Long,
+    val workerName: String,
+    val salaryMode: Int,
+    val date: String,
+    val record: AttendanceEntity?,
+    val hourlyRate: Double,
+    val dailyRate: Double,
+)
 
 @Composable
 private fun DeleteConfirmDialog(
@@ -584,45 +794,60 @@ private fun DeleteConfirmDialog(
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun NativeDatePickerDialog(
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit,
 ) {
-    val initialMillis = remember {
-        val todayUtc = LocalDate.now(ZoneId.of("UTC"))
-        todayUtc.atStartOfDay(ZoneId.of("UTC"))
-            .toInstant()
-            .toEpochMilli()
-    }
-    val pickerState = androidx.compose.material3.rememberDatePickerState(initialSelectedDateMillis = initialMillis)
+    val today = remember { LocalDate.now() }
+    var year by rememberSaveable { mutableStateOf(today.year) }
+    var month by rememberSaveable { mutableStateOf(today.monthValue) }
+    val maxDay = remember(year, month) { YearMonth.of(year, month).lengthOfMonth() }
+    var day by rememberSaveable { mutableStateOf(today.dayOfMonth) }
 
-    DatePickerDialog(
+    if (day > maxDay) {
+        day = maxDay
+    }
+
+    AlertDialog(
         onDismissRequest = onDismiss,
+        title = { Text("选择日期") },
+        text = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                NumberDropdown(
+                    value = year,
+                    values = ((today.year - 5)..(today.year + 2)).toList(),
+                    suffix = "年",
+                    onValueChange = { year = it },
+                    modifier = Modifier.weight(1.25f),
+                )
+                NumberDropdown(
+                    value = month,
+                    values = (1..12).toList(),
+                    suffix = "月",
+                    onValueChange = { month = it },
+                    modifier = Modifier.weight(1f),
+                )
+                NumberDropdown(
+                    value = day,
+                    values = (1..maxDay).toList(),
+                    suffix = "日",
+                    onValueChange = { day = it },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        },
         confirmButton = {
-            TextButton(
-                onClick = {
-                    val millis = pickerState.selectedDateMillis
-                    if (millis != null) {
-                        val date = Instant.ofEpochMilli(millis)
-                            .atZone(ZoneId.of("UTC"))
-                            .toLocalDate()
-                            .toString()
-                        onConfirm(date)
-                    }
-                },
-                enabled = pickerState.selectedDateMillis != null,
-            ) {
+            TextButton(onClick = {
+                onConfirm("%04d-%02d-%02d".format(year, month, day))
+            }) {
                 Text("确定")
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
-    ) {
-        DatePicker(state = pickerState)
-    }
+    )
 }
 
 @Composable
@@ -647,14 +872,14 @@ private fun ProjectListScreen(
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item {
             Text(
                 "我的项目",
-                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
-                modifier = Modifier.padding(bottom = 8.dp)
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                modifier = Modifier.padding(bottom = 2.dp)
             )
         }
         item {
@@ -671,7 +896,7 @@ private fun ProjectListScreen(
                         }
                     }
                 },
-                shape = RoundedCornerShape(16.dp),
+                shape = RoundedCornerShape(12.dp),
                 singleLine = true,
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
@@ -708,7 +933,7 @@ private fun ProjectCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
+            .clip(RoundedCornerShape(14.dp))
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = { },
@@ -719,11 +944,11 @@ private fun ProjectCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
     ) {
         Row(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Surface(
-                modifier = Modifier.size(56.dp),
+                modifier = Modifier.size(40.dp),
                 shape = CircleShape,
                 color = when (project.name.firstOrNull()?.uppercaseChar() ?: ' ') {
                     in 'A'..'G' -> MaterialTheme.colorScheme.primaryContainer
@@ -735,7 +960,7 @@ private fun ProjectCard(
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         project.name.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleLarge.copy(
+                        style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = when (project.name.firstOrNull()?.uppercaseChar() ?: ' ') {
                                 in 'A'..'G' -> MaterialTheme.colorScheme.onPrimaryContainer
@@ -747,24 +972,30 @@ private fun ProjectCard(
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(10.dp))
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
                 Text(
                     project.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
                 TotalsCompactText(project.totals)
             }
-            IconButton(onClick = { showDeleteConfirm = true }) {
+            IconButton(
+                modifier = Modifier.size(36.dp),
+                onClick = { showDeleteConfirm = true },
+            ) {
                 Icon(
                     Icons.Default.Delete,
                     contentDescription = "删除",
-                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f),
+                    modifier = Modifier.size(18.dp),
                 )
             }
         }
@@ -939,6 +1170,131 @@ private fun PaymentRecordCard(
 }
 
 @Composable
+private fun ProjectGroupScreen(
+    groups: List<ProjectGroupSummaryUi>,
+    onCreateGroup: () -> Unit,
+    onEditGroup: (ProjectGroupSummaryUi) -> Unit,
+    onDeleteGroup: (ProjectGroupSummaryUi) -> Unit,
+) {
+    var selectedGroupId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedGroup = groups.firstOrNull { it.id == selectedGroupId }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("项目汇总", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    Text("从已创建项目中组合汇总", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onCreateGroup) {
+                    Text("新建汇总")
+                }
+            }
+        }
+
+        if (groups.isEmpty()) {
+            item { EmptyState("还没有汇总，点击右上角新建。") }
+        } else if (selectedGroup == null) {
+            items(groups, key = { it.id }) { group ->
+                ProjectGroupCard(
+                    group = group,
+                    onOpen = { selectedGroupId = group.id },
+                    onEdit = { onEditGroup(group) },
+                    onDelete = { onDeleteGroup(group) },
+                )
+            }
+        } else {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { selectedGroupId = null }) {
+                        Text("返回列表")
+                    }
+                    TextButton(onClick = { onEditGroup(selectedGroup) }) {
+                        Text("增删项目")
+                    }
+                }
+            }
+            item {
+                SummaryCard(
+                    title = selectedGroup.name,
+                    totals = selectedGroup.totals,
+                    isProjectTotal = true,
+                )
+            }
+            item {
+                Text("包含项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            }
+            items(selectedGroup.projects, key = { it.id }) { project ->
+                ProjectCard(project = project, onClick = {}, onDelete = {})
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProjectGroupCard(
+    group: ProjectGroupSummaryUi,
+    onOpen: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(onClick = onOpen, onLongClick = {}),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(group.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${group.projects.size} 个项目", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onEdit) { Text("编辑") }
+                IconButton(modifier = Modifier.size(34.dp), onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除汇总", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                }
+            }
+            TotalsCompactText(group.totals)
+            Text(
+                group.projects.joinToString("、") { it.name },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    if (showDeleteConfirm) {
+        DeleteConfirmDialog(
+            title = "删除汇总",
+            message = "确定删除“${group.name}”吗？不会删除原项目。",
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDelete()
+            },
+        )
+    }
+}
+
+@Composable
 private fun DateCard(
     dateSummary: DateSummaryUi,
     onClick: () -> Unit,
@@ -999,6 +1355,8 @@ private fun DayDetailScreen(
     detail: DayDetailUi,
     selectedTab: Int,
     onTabSelected: (Int) -> Unit,
+    attendanceRows: List<AttendanceDashboardRow>,
+    workers: List<WorkerEntity>,
     onDeletePhoto: (DayPhotoEntity) -> Unit,
     onEditStorage: (StorageRecordEntity) -> Unit,
     onDeleteStorage: (StorageRecordEntity) -> Unit,
@@ -1008,10 +1366,17 @@ private fun DayDetailScreen(
     onDeleteFee: (FeeRecordEntity) -> Unit,
     onTakePhoto: () -> Unit,
     onAddFee: () -> Unit,
+    onAddWorker: () -> Unit,
+    onDeleteWorker: (WorkerEntity) -> Unit,
+    onAddAttendanceForCell: (Long, String, Int, String) -> Unit,
+    onEditAttendance: (Long, String, Int, AttendanceEntity) -> Unit,
+    onDeleteAttendance: (AttendanceEntity) -> Unit,
+    onExportAttendanceCsv: () -> Unit,
+    onExportAttendancePdf: () -> Unit,
     onExportCsv: (DayDetailUi) -> Unit,
     onExportPdf: (DayDetailUi) -> Unit,
 ) {
-    val tabs = listOf("汇总", "入库清单", "出库清单", "费用支出", "现场照片")
+    val tabs = listOf("汇总", "入库清单", "出库清单", "费用支出", "现场照片", "考勤表")
     
     var selectedFeeTab by remember { mutableStateOf(0) }
     val feeCategories = listOf("全部", FeeTypes.LABOR, FeeTypes.AGENCY, FeeTypes.LOADING, "其他")
@@ -1193,9 +1558,231 @@ private fun DayDetailScreen(
                         }
                     }
                 }
+                5 -> {
+                    item {
+                        AttendanceTabContent(
+                            month = detail.date.take(7),
+                            workers = workers,
+                            rows = attendanceRows,
+                            onAddWorker = onAddWorker,
+                            onDeleteWorker = onDeleteWorker,
+                            onAddAttendanceForCell = onAddAttendanceForCell,
+                            onEditAttendance = onEditAttendance,
+                            onDeleteAttendance = onDeleteAttendance,
+                            onExportCsv = onExportAttendanceCsv,
+                            onExportPdf = onExportAttendancePdf,
+                        )
+                    }
+                }
             }
             item { Spacer(modifier = Modifier.height(100.dp)) }
         }
+    }
+}
+
+@Composable
+private fun AttendanceTabContent(
+    month: String,
+    workers: List<WorkerEntity>,
+    rows: List<AttendanceDashboardRow>,
+    onAddWorker: () -> Unit,
+    onDeleteWorker: (WorkerEntity) -> Unit,
+    onAddAttendanceForCell: (Long, String, Int, String) -> Unit,
+    onEditAttendance: (Long, String, Int, AttendanceEntity) -> Unit,
+    onDeleteAttendance: (AttendanceEntity) -> Unit,
+    onExportCsv: () -> Unit,
+    onExportPdf: () -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("考勤表", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(month, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Row {
+                TextButton(onClick = onAddWorker) {
+                    Text("新增人员")
+                }
+            }
+        }
+
+        if (workers.isEmpty()) {
+            EmptyState("还没有人员，先新增人员后再添加考勤。")
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onExportCsv, enabled = rows.isNotEmpty()) {
+                    Text("导出CSV")
+                }
+                TextButton(onClick = onExportPdf, enabled = rows.isNotEmpty()) {
+                    Text("导出PDF")
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                workers.forEach { worker ->
+                    WorkerCompactRow(worker = worker, onDelete = { onDeleteWorker(worker) })
+                }
+            }
+            AttendanceBoardScreen(
+                month = month,
+                rows = rows,
+                modifier = Modifier.fillMaxWidth(),
+                enableVerticalScroll = false,
+                onAddRecord = onAddAttendanceForCell,
+                onEditRecord = onEditAttendance,
+                onDeleteRecord = onDeleteAttendance,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttendanceProjectSummaryScreen(
+    month: String,
+    summaries: List<AttendanceProjectSummary>,
+    onOpenProject: (AttendanceProjectSummary) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("项目考勤汇总", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text(month, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        if (summaries.isEmpty()) {
+            item { EmptyState("暂无项目数据") }
+        } else {
+            items(summaries, key = { it.projectId }) { summary ->
+                AttendanceProjectSummaryCard(summary = summary, onClick = { onOpenProject(summary) })
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttendanceProjectBoardScreen(
+    month: String,
+    projectName: String,
+    rows: List<AttendanceDashboardRow>,
+    onBack: () -> Unit,
+    onExportCsv: () -> Unit,
+    onExportPdf: () -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(projectName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("考勤表 · $month", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                TextButton(onClick = onBack) {
+                    Text("返回")
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onExportCsv, enabled = rows.isNotEmpty()) {
+                    Text("导出CSV")
+                }
+                TextButton(onClick = onExportPdf, enabled = rows.isNotEmpty()) {
+                    Text("导出PDF")
+                }
+            }
+        }
+        if (rows.isEmpty()) {
+            item { EmptyState("这个项目本月暂无考勤数据") }
+        } else {
+            item {
+                AttendanceBoardScreen(
+                    month = month,
+                    rows = rows,
+                    modifier = Modifier.fillMaxWidth(),
+                    enableVerticalScroll = false,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AttendanceProjectSummaryCard(
+    summary: AttendanceProjectSummary,
+    onClick: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(onClick = onClick, onLongClick = {}),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(summary.projectName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CompactMetric("工时", "${formatNumber(summary.totalWorkHours)}h", Modifier.weight(1f), highlight = true)
+                CompactMetric("天数", "${summary.totalPresentDays}天", Modifier.weight(1f), highlight = true)
+                CompactMetric("工资", formatCurrency(summary.totalSalary), Modifier.weight(1f), highlight = true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WorkerCompactRow(
+    worker: WorkerEntity,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(worker.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                Text(
+                    if (worker.salaryMode == SalaryMode.HOURLY) "计时 · ¥${formatNumber(worker.hourlyRate)}/小时" else "计天 · ¥${formatNumber(worker.dailyRate)}/天",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            IconButton(modifier = Modifier.size(32.dp), onClick = { showDeleteConfirm = true }) {
+                Icon(Icons.Default.Delete, contentDescription = "删除人员", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        DeleteConfirmDialog(
+            title = "删除考勤人员",
+            message = "确定删除“${worker.name}”吗？该人员的考勤记录也会一起删除。",
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDelete()
+            },
+        )
     }
 }
 
@@ -1659,38 +2246,51 @@ private fun SmallSummaryRow(label: String, value: String) {
 
 @Composable
 private fun TotalsCompactText(totals: Totals) {
-    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(1.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                "入: ${formatNumber(totals.totalCount)}件 / ${formatNumber(totals.totalWeight)}斤",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
-                "出: ${formatNumber(totals.totalOutboundCount)}件",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            CompactMetric("入库", "${formatNumber(totals.totalCount)}件", Modifier.weight(1f))
+            CompactMetric("出库", "${formatNumber(totals.totalOutboundCount)}件", Modifier.weight(1f))
+            CompactMetric("库存", "${formatNumber(totals.netTotalCount)}件", Modifier.weight(1f), highlight = true)
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Text(
-                "存: ${formatNumber(totals.netTotalCount)}件 / ${formatNumber(totals.netTotalWeight)}斤",
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary
-            )
-            Text(
-                "支: ${formatCurrency(totals.totalFee)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Text(
+            "净重 ${formatNumber(totals.netTotalWeight)}斤 · 支出 ${formatCurrency(totals.totalFee)}",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun CompactMetric(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    highlight: Boolean = false,
+) {
+    Row(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = if (highlight) FontWeight.Bold else FontWeight.Medium,
+            color = if (highlight) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1757,6 +2357,402 @@ private fun ProjectDialog(
 }
 
 @Composable
+private fun ProjectGroupDialog(
+    group: ProjectGroupSummaryUi?,
+    projects: List<ProjectSummaryUi>,
+    onDismiss: () -> Unit,
+    onConfirm: (Long?, String, List<Long>) -> Unit,
+) {
+    var name by remember(group?.id) { mutableStateOf(group?.name.orEmpty()) }
+    var selectedIds by remember(group?.id, projects) {
+        mutableStateOf(group?.projects?.map { it.id }?.toSet().orEmpty())
+    }
+    val canSave = name.isNotBlank() && selectedIds.isNotEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (group == null) "新建汇总" else "编辑汇总") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("汇总名称") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                )
+                Text("选择已创建项目", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (projects.isEmpty()) {
+                    Text("还没有项目，先去库存页创建项目。", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.heightIn(max = 320.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        items(projects, key = { it.id }) { project ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable {
+                                        selectedIds = if (project.id in selectedIds) {
+                                            selectedIds - project.id
+                                        } else {
+                                            selectedIds + project.id
+                                        }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Checkbox(
+                                    checked = project.id in selectedIds,
+                                    onCheckedChange = { checked ->
+                                        selectedIds = if (checked) selectedIds + project.id else selectedIds - project.id
+                                    },
+                                )
+                                Column {
+                                    Text(project.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "库存 ${formatNumber(project.totals.netTotalCount)}件 · 欠款 ${formatCurrency(project.totals.totalDebt)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(group?.id, name, selectedIds.toList()) },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("保存汇总")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
+private fun WorkerDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, Int, Double, Double) -> Unit,
+) {
+    var name by rememberSaveable { mutableStateOf("") }
+    var salaryMode by rememberSaveable { mutableStateOf(SalaryMode.HOURLY) }
+    var hourlyRate by rememberSaveable { mutableStateOf("") }
+    var dailyRate by rememberSaveable { mutableStateOf("") }
+
+    val hourlyValue = hourlyRate.toDoubleOrNull()
+    val dailyValue = dailyRate.toDoubleOrNull()
+    val canSave = name.isNotBlank() && when (salaryMode) {
+        SalaryMode.HOURLY -> hourlyValue != null
+        else -> dailyValue != null
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新增考勤人员") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("姓名") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { salaryMode = SalaryMode.HOURLY },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = if (salaryMode == SalaryMode.HOURLY) {
+                            ButtonDefaults.buttonColors()
+                        } else {
+                            ButtonDefaults.outlinedButtonColors()
+                        },
+                    ) {
+                        Text("计时")
+                    }
+                    Button(
+                        onClick = { salaryMode = SalaryMode.DAILY },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = if (salaryMode == SalaryMode.DAILY) {
+                            ButtonDefaults.buttonColors()
+                        } else {
+                            ButtonDefaults.outlinedButtonColors()
+                        },
+                    ) {
+                        Text("计天")
+                    }
+                }
+                if (salaryMode == SalaryMode.HOURLY) {
+                    OutlinedTextField(
+                        value = hourlyRate,
+                        onValueChange = { hourlyRate = it },
+                        label = { Text("时薪标准") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = dailyRate,
+                        onValueChange = { dailyRate = it },
+                        label = { Text("日薪标准") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm(
+                        name,
+                        salaryMode,
+                        hourlyValue ?: 0.0,
+                        dailyValue ?: 0.0,
+                    )
+                },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("保存人员")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
+private fun AttendanceRecordDialog(
+    target: AttendanceEditTarget,
+    onDismiss: () -> Unit,
+    onConfirm: (AttendanceEntity?, Long, String, String?, String?, Boolean, Double?, Double?) -> Unit,
+) {
+    val initialStartParts = remember(target.record?.id) { parseTimeParts(target.record?.startTime, 8, 0) }
+    val initialEndParts = remember(target.record?.id) { parseTimeParts(target.record?.endTime, 18, 0) }
+    var mode by remember(target.record?.id, target.salaryMode) {
+        mutableStateOf(
+            if (target.record?.startTime != null || target.salaryMode == SalaryMode.HOURLY) {
+                SalaryMode.HOURLY
+            } else {
+                SalaryMode.DAILY
+            }
+        )
+    }
+    var startHour by remember(target.record?.id) { mutableStateOf(initialStartParts.first) }
+    var startMinute by remember(target.record?.id) { mutableStateOf(initialStartParts.second) }
+    var endHour by remember(target.record?.id) { mutableStateOf(initialEndParts.first) }
+    var endMinute by remember(target.record?.id) { mutableStateOf(initialEndParts.second) }
+    var isPresent by remember(target.record?.id) { mutableStateOf(target.record?.isPresent ?: true) }
+    var hourlyRateText by remember(target.record?.id, target.hourlyRate) { mutableStateOf(target.hourlyRate.toText()) }
+    var dailyRateText by remember(target.record?.id, target.dailyRate) { mutableStateOf(target.dailyRate.toText()) }
+
+    val isHourly = mode == SalaryMode.HOURLY
+    val startTime = "%02d:%02d".format(startHour, startMinute)
+    val endTime = "%02d:%02d".format(endHour, endMinute)
+    val hourlyRateValue = hourlyRateText.toDoubleOrNull()
+    val dailyRateValue = dailyRateText.toDoubleOrNull()
+    val canSave = if (isHourly) hourlyRateValue != null else dailyRateValue != null
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (target.record == null) "添加考勤" else "修改考勤") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("${target.workerName} · ${target.date}", style = MaterialTheme.typography.bodyMedium)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { mode = SalaryMode.HOURLY },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = if (isHourly) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors(),
+                    ) {
+                        Text("按时间")
+                    }
+                    Button(
+                        onClick = { mode = SalaryMode.DAILY },
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = if (!isHourly) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors(),
+                    ) {
+                        Text("按天")
+                    }
+                }
+
+                if (isHourly) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TimePickerField(
+                            label = "开始时间",
+                            hour = startHour,
+                            minute = startMinute,
+                            onHourChange = { startHour = it },
+                            onMinuteChange = { startMinute = it },
+                            modifier = Modifier.weight(1f),
+                        )
+                        TimePickerField(
+                            label = "结束时间",
+                            hour = endHour,
+                            minute = endMinute,
+                            onHourChange = { endHour = it },
+                            onMinuteChange = { endMinute = it },
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                    OutlinedTextField(
+                        value = hourlyRateText,
+                        onValueChange = { hourlyRateText = it },
+                        label = { Text("本次时薪") },
+                        supportingText = { Text("保存后会记住，下次默认带出") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(
+                            checked = isPresent,
+                            onCheckedChange = { isPresent = it },
+                        )
+                        Text("已出勤")
+                    }
+                    OutlinedTextField(
+                        value = dailyRateText,
+                        onValueChange = { dailyRateText = it },
+                        label = { Text("本次日薪") },
+                        supportingText = { Text("保存后会记住，下次默认带出") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onConfirm(
+                        target.record,
+                        target.workerId,
+                        target.date,
+                        if (isHourly) startTime else null,
+                        if (isHourly) endTime else null,
+                        if (!isHourly) isPresent else true,
+                        hourlyRateValue,
+                        dailyRateValue,
+                    )
+                },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text("保存考勤")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+private fun parseTimeParts(value: String?, defaultHour: Int, defaultMinute: Int): Pair<Int, Int> {
+    val parts = value?.split(":")
+    val hour = parts?.getOrNull(0)?.toIntOrNull() ?: defaultHour
+    val minute = parts?.getOrNull(1)?.toIntOrNull() ?: defaultMinute
+    return hour.coerceIn(0, 23) to minute.coerceIn(0, 59)
+}
+
+@Composable
+private fun TimePickerField(
+    label: String,
+    hour: Int,
+    minute: Int,
+    onHourChange: (Int) -> Unit,
+    onMinuteChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            NumberDropdown(
+                value = hour,
+                values = (0..23).toList(),
+                suffix = "时",
+                onValueChange = onHourChange,
+                modifier = Modifier.weight(1f),
+            )
+            NumberDropdown(
+                value = minute,
+                values = (0..59 step 5).toList(),
+                suffix = "分",
+                onValueChange = onMinuteChange,
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NumberDropdown(
+    value: Int,
+    values: List<Int>,
+    suffix: String,
+    onValueChange: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box(modifier = modifier) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Text("%02d$suffix".format(value))
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 220.dp),
+        ) {
+            values.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text("%02d$suffix".format(item)) },
+                    onClick = {
+                        onValueChange(item)
+                        expanded = false
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun StorageRecordDialog(
     record: StorageRecordEntity?,
     itemNames: List<String>,
@@ -1772,11 +2768,27 @@ private fun StorageRecordDialog(
 
     var showHistory by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val nameInteractionSource = remember { MutableInteractionSource() }
+    val isNamePressed by nameInteractionSource.collectIsPressedAsState()
 
     val countValue = count.toDoubleOrNull()
     val weightValue = weightPerUnit.toDoubleOrNull()
-    val priceValue = pricePerWeight.toDoubleOrNull()
-    val canSave = name.isNotBlank() && countValue != null && weightValue != null && priceValue != null
+    val priceValue = pricePerWeight.toDoubleOrNull() ?: 0.0
+    val isPriceValid = pricePerWeight.isBlank() || pricePerWeight.toDoubleOrNull() != null
+    val canSave = name.isNotBlank() && countValue != null && weightValue != null && isPriceValid
+    val filteredItemNames = remember(itemNames, name) {
+        if (name.isBlank()) {
+            itemNames
+        } else {
+            itemNames.filter { it.contains(name, ignoreCase = true) }
+        }
+    }
+
+    LaunchedEffect(isNamePressed) {
+        if (isNamePressed && itemNames.isNotEmpty()) {
+            showHistory = true
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1788,43 +2800,49 @@ private fun StorageRecordDialog(
                         value = name,
                         onValueChange = {
                             name = it
-                            showHistory = it.isNotBlank()
+                            showHistory = itemNames.isNotEmpty()
                         },
                         label = { Text("物品/货物名称") },
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { state ->
+                                if (state.isFocused && itemNames.isNotEmpty()) {
+                                    showHistory = true
+                                }
+                            },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
-                        leadingIcon = { Icon(Icons.Default.Inventory, null) }
+                        leadingIcon = { Icon(Icons.Default.Inventory, null) },
+                        interactionSource = nameInteractionSource
                     )
-                    if (showHistory && itemNames.isNotEmpty()) {
-                        val filtered = itemNames.filter { it.contains(name, ignoreCase = true) }
-                        if (filtered.isNotEmpty()) {
-                            DropdownMenu(
-                                expanded = showHistory,
-                                onDismissRequest = { showHistory = false },
-                                modifier = Modifier.fillMaxWidth(0.8f),
-                                properties = PopupProperties(focusable = false)
-                            ) {
-                                filtered.forEach { historyName ->
-                                    DropdownMenuItem(
-                                        leadingIcon = { Icon(Icons.Default.History, null, modifier = Modifier.size(18.dp)) },
-                                        text = { Text(historyName) },
-                                        onClick = {
-                                            name = historyName
-                                            showHistory = false
-                                            scope.launch {
-                                                val lastPrice = onGetLastPrice(historyName)
-                                                if (lastPrice != null) {
-                                                    pricePerWeight = formatNumber(lastPrice)
-                                                }
-                                                val lastWeight = onGetLastWeight(historyName)
-                                                if (lastWeight != null) {
-                                                    weightPerUnit = formatNumber(lastWeight)
-                                                }
+                    if (showHistory && filteredItemNames.isNotEmpty()) {
+                        DropdownMenu(
+                            expanded = showHistory,
+                            onDismissRequest = { showHistory = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .heightIn(max = 240.dp),
+                            properties = PopupProperties(focusable = false)
+                        ) {
+                            filteredItemNames.forEach { historyName ->
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.History, null, modifier = Modifier.size(18.dp)) },
+                                    text = { Text(historyName) },
+                                    onClick = {
+                                        name = historyName
+                                        showHistory = false
+                                        scope.launch {
+                                            val lastPrice = onGetLastPrice(historyName)
+                                            if (lastPrice != null) {
+                                                pricePerWeight = if (lastPrice == 0.0) "" else formatNumber(lastPrice)
                                             }
-                                        },
-                                    )
-                                }
+                                            val lastWeight = onGetLastWeight(historyName)
+                                            if (lastWeight != null) {
+                                                weightPerUnit = formatNumber(lastWeight)
+                                            }
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
@@ -1851,7 +2869,7 @@ private fun StorageRecordDialog(
                     OutlinedTextField(
                         value = pricePerWeight,
                         onValueChange = { pricePerWeight = it },
-                        label = { Text("单价(元/斤)") },
+                        label = { Text("单价(元/斤，可不填)") },
                         modifier = Modifier.weight(1f),
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
@@ -1861,7 +2879,7 @@ private fun StorageRecordDialog(
                 
                 if (canSave) {
                     val totalWeight = countValue!! * weightValue!!
-                    val totalPrice = totalWeight * priceValue!!
+                    val totalPrice = totalWeight * priceValue
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.4f),
                         shape = RoundedCornerShape(8.dp),
@@ -1880,7 +2898,7 @@ private fun StorageRecordDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(name, countValue!!, weightValue!!, priceValue!!) },
+                onClick = { onConfirm(name, countValue!!, weightValue!!, priceValue) },
                 enabled = canSave,
                 shape = RoundedCornerShape(12.dp)
             ) {

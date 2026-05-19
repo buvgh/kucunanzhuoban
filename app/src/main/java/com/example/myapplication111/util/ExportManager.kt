@@ -8,14 +8,153 @@ import android.graphics.Paint
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import androidx.core.content.FileProvider
+import com.example.myapplication111.data.AttendanceDashboardRow
 import com.example.myapplication111.data.DayDetailUi
+import com.example.myapplication111.data.SalaryMode
 import java.io.File
 import java.io.FileOutputStream
 import java.text.SimpleDateFormat
+import java.time.YearMonth
 import java.util.Date
 import java.util.Locale
 
 object ExportManager {
+    fun exportAttendanceBoardToCsv(
+        context: Context,
+        projectName: String,
+        month: String,
+        rows: List<AttendanceDashboardRow>,
+    ) {
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val file = File(context.cacheDir, "Attendance_${projectName}_${month}_$timestamp.csv")
+        val days = (1..YearMonth.parse(month).lengthOfMonth()).toList()
+
+        try {
+            FileOutputStream(file).use { output ->
+                output.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
+                val writer = output.bufferedWriter()
+                writer.write("项目,$projectName\n")
+                writer.write("月份,$month\n\n")
+                writer.write(("员工,计薪模式," + days.joinToString(",") { "${it}日" } + ",合计,工资\n"))
+
+                rows.forEach { row ->
+                    val summary = row.summary
+                    val modeText = if (summary.salaryMode == SalaryMode.HOURLY) "计时" else "计天"
+                    val cells = days.joinToString(",") { day ->
+                        val cell = row.cellsByDay[day]
+                        when {
+                            cell == null -> ""
+                            summary.salaryMode == SalaryMode.HOURLY && cell.totalWorkHours > 0.0 -> "${fmtInt(cell.totalWorkHours)}h"
+                            summary.salaryMode == SalaryMode.DAILY && cell.isPresent -> "出勤"
+                            else -> ""
+                        }
+                    }
+                    val total = if (summary.salaryMode == SalaryMode.HOURLY) {
+                        "${fmtInt(summary.totalWorkHours)}h"
+                    } else {
+                        "${summary.totalPresentDays}天"
+                    }
+                    writer.write("${summary.workerName},$modeText,$cells,$total,${fmtInt(summary.totalSalary)}\n")
+                }
+
+                writer.write("\n汇总\n")
+                writer.write("总工时,${fmtInt(rows.sumOf { it.summary.totalWorkHours })}h\n")
+                writer.write("总天数,${rows.sumOf { it.summary.totalPresentDays }}天\n")
+                writer.write("总工资,${fmtInt(rows.sumOf { it.summary.totalSalary })}\n")
+                writer.flush()
+            }
+            shareFile(context, file, "text/csv")
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun exportAttendanceBoardToPdf(
+        context: Context,
+        projectName: String,
+        month: String,
+        rows: List<AttendanceDashboardRow>,
+    ) {
+        val pdfDocument = PdfDocument()
+        val pageInfo = PdfDocument.PageInfo.Builder(842, 595, 1).create()
+        val page = pdfDocument.startPage(pageInfo)
+        val canvas = page.canvas
+        val titlePaint = Paint().apply {
+            textSize = 18f
+            isFakeBoldText = true
+            color = Color.BLACK
+        }
+        val textPaint = Paint().apply {
+            textSize = 8f
+            color = Color.BLACK
+        }
+        val boldPaint = Paint(textPaint).apply { isFakeBoldText = true }
+        val linePaint = Paint().apply {
+            strokeWidth = 0.5f
+            color = Color.LTGRAY
+        }
+        val headerBgPaint = Paint().apply { color = Color.rgb(245, 245, 245) }
+
+        val margin = 24f
+        val days = (1..YearMonth.parse(month).lengthOfMonth()).toList()
+        val nameWidth = 70f
+        val totalWidth = 52f
+        val salaryWidth = 58f
+        val dayWidth = ((pageInfo.pageWidth - margin * 2 - nameWidth - totalWidth - salaryWidth) / days.size).coerceAtLeast(16f)
+        var y = 34f
+
+        canvas.drawText("考勤表  $projectName  $month", margin, y, titlePaint)
+        y += 18f
+        canvas.drawRect(margin, y, pageInfo.pageWidth - margin, y + 18f, headerBgPaint)
+        canvas.drawText("员工", margin + 3f, y + 12f, boldPaint)
+        var x = margin + nameWidth
+        days.forEach { day ->
+            canvas.drawText(day.toString(), x + 2f, y + 12f, boldPaint)
+            x += dayWidth
+        }
+        canvas.drawText("合计", x + 3f, y + 12f, boldPaint)
+        canvas.drawText("工资", x + totalWidth + 3f, y + 12f, boldPaint)
+        y += 18f
+
+        rows.take(22).forEach { row ->
+            x = margin
+            canvas.drawText(row.summary.workerName.take(6), x + 3f, y + 12f, textPaint)
+            x += nameWidth
+            days.forEach { day ->
+                val cell = row.cellsByDay[day]
+                val value = when {
+                    cell == null -> ""
+                    row.summary.salaryMode == SalaryMode.HOURLY && cell.totalWorkHours > 0.0 -> fmtInt(cell.totalWorkHours)
+                    row.summary.salaryMode == SalaryMode.DAILY && cell.isPresent -> "√"
+                    else -> ""
+                }
+                canvas.drawText(value, x + 2f, y + 12f, textPaint)
+                x += dayWidth
+            }
+            val total = if (row.summary.salaryMode == SalaryMode.HOURLY) "${fmtInt(row.summary.totalWorkHours)}h" else "${row.summary.totalPresentDays}天"
+            canvas.drawText(total, x + 3f, y + 12f, textPaint)
+            canvas.drawText(fmtInt(row.summary.totalSalary), x + totalWidth + 3f, y + 12f, textPaint)
+            canvas.drawLine(margin, y + 18f, pageInfo.pageWidth - margin, y + 18f, linePaint)
+            y += 18f
+        }
+
+        y += 18f
+        canvas.drawText("汇总: 工时 ${fmtInt(rows.sumOf { it.summary.totalWorkHours })}h   天数 ${rows.sumOf { it.summary.totalPresentDays }}天   工资 ${fmtInt(rows.sumOf { it.summary.totalSalary })}", margin, y, boldPaint)
+
+        pdfDocument.finishPage(page)
+
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+        val file = File(context.cacheDir, "Attendance_${projectName}_${month}_$timestamp.pdf")
+        try {
+            pdfDocument.writeTo(FileOutputStream(file))
+            pdfDocument.close()
+            shareFile(context, file, "application/pdf")
+        } catch (e: Exception) {
+            e.printStackTrace()
+            pdfDocument.close()
+        }
+    }
+
     fun exportDayDetailToCsv(context: Context, detail: DayDetailUi) {
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val fileName = "Export_${detail.projectName}_${detail.date}_$timestamp.csv"
