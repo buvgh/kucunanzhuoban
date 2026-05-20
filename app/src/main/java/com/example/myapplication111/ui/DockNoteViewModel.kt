@@ -8,6 +8,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.example.myapplication111.data.AttendanceDashboardRow
 import com.example.myapplication111.data.AttendanceEntity
+import com.example.myapplication111.data.AttendanceMonthBoard
 import com.example.myapplication111.data.AttendanceProjectSummary
 import com.example.myapplication111.data.AttendanceSummary
 import com.example.myapplication111.data.DockNoteRepository
@@ -261,13 +262,17 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         return repository.observeMonthlyAttendanceDashboard(projectId, month)
     }
 
-    fun observeProjectAttendanceSummaries(month: String): Flow<List<AttendanceProjectSummary>> {
-        return repository.observeProjectAttendanceSummaries(month)
+    fun observeProjectAttendanceSummaries(): Flow<List<AttendanceProjectSummary>> {
+        return repository.observeProjectAttendanceSummaries()
     }
 
-    fun createWorker(projectId: Long, name: String, salaryMode: Int, hourlyRate: Double, dailyRate: Double) {
+    fun observeAttendanceMonthBoards(projectId: Long): Flow<List<AttendanceMonthBoard>> {
+        return repository.observeAttendanceMonthBoards(projectId)
+    }
+
+    fun createWorker(projectId: Long, name: String) {
         viewModelScope.launch {
-            repository.createWorker(projectId, name, salaryMode, hourlyRate, dailyRate)
+            repository.createWorker(projectId, name)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -276,6 +281,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         projectId: Long,
         workerId: Long,
         date: String,
+        salaryMode: Int,
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
@@ -283,7 +289,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         dailyRate: Double?,
     ) {
         viewModelScope.launch {
-            repository.saveAttendanceRecord(projectId, workerId, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            repository.saveAttendanceRecord(projectId, workerId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -291,6 +297,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     fun updateAttendanceRecord(
         attendanceId: Long,
         date: String,
+        salaryMode: Int,
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
@@ -298,7 +305,7 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         dailyRate: Double?,
     ) {
         viewModelScope.launch {
-            repository.updateAttendanceRecord(attendanceId, date, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            repository.updateAttendanceRecord(attendanceId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
             BackupManager.backupDatabase(getApplication())
         }
     }

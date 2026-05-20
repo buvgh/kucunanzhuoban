@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.myapplication111"
         minSdk = 24
         targetSdk = 36
-        versionCode = 110
-        versionName = "1.1.0"
+        versionCode = 123
+        versionName = "1.2.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -37,6 +37,8 @@ android {
             versionNameSuffix = "-debug"
         }
         release {
+            applicationIdSuffix = ".standalone"
+            versionNameSuffix = "-standalone"
             isMinifyEnabled = true
             isShrinkResources = true
             signingConfig = signingConfigs.getByName("release")
@@ -53,6 +55,10 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 }
 

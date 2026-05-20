@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -26,6 +27,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
@@ -43,11 +45,16 @@ fun AttendanceBoardScreen(
     rows: List<AttendanceDashboardRow>,
     modifier: Modifier = Modifier,
     enableVerticalScroll: Boolean = true,
-    onAddRecord: (workerId: Long, workerName: String, salaryMode: Int, date: String) -> Unit = { _, _, _, _ -> },
-    onEditRecord: (workerId: Long, workerName: String, salaryMode: Int, record: AttendanceEntity) -> Unit = { _, _, _, _ -> },
+    onAddRecord: (workerId: Long, workerName: String, date: String) -> Unit = { _, _, _ -> },
+    onEditRecord: (workerId: Long, workerName: String, record: AttendanceEntity) -> Unit = { _, _, _ -> },
     onDeleteRecord: (AttendanceEntity) -> Unit = {},
 ) {
     val days = remember(month) { (1..YearMonth.parse(month).lengthOfMonth()).toList() }
+    val configuration = LocalConfiguration.current
+    val compactWidth = configuration.screenWidthDp < 390
+    val nameColumnWidth = if (compactWidth) 88.dp else 104.dp
+    val dayColumnWidth = if (compactWidth) 46.dp else 52.dp
+    val summaryColumnWidth = if (compactWidth) 78.dp else 92.dp
     val horizontalScrollState = rememberScrollState()
     val verticalScrollState = rememberScrollState()
     val totalHours = rows.sumOf { it.summary.totalWorkHours }
@@ -66,79 +73,87 @@ fun AttendanceBoardScreen(
             .then(scrollModifier),
     ) {
         Column {
-            AttendanceHeaderCell("员工姓名", width = 104.dp)
-            rows.forEach { row ->
-                AttendanceNameCell(
-                    name = row.summary.workerName,
-                    salaryMode = row.summary.salaryMode,
-                )
+            AttendanceHeaderCell("人员", width = nameColumnWidth)
+            Column(
+                modifier = if (enableVerticalScroll) {
+                    Modifier
+                } else {
+                    Modifier.heightIn(max = if (compactWidth) 430.dp else 520.dp).verticalScroll(verticalScrollState)
+                },
+            ) {
+                rows.forEach { row ->
+                    AttendanceNameCell(
+                        name = row.summary.workerName,
+                        width = nameColumnWidth,
+                    )
+                }
+                AttendanceHeaderCell("总计", width = nameColumnWidth)
             }
-            AttendanceHeaderCell("总计", width = 104.dp)
         }
 
-        Column(modifier = Modifier.horizontalScroll(horizontalScrollState)) {
-            Row {
+        Column {
+            Row(modifier = Modifier.horizontalScroll(horizontalScrollState)) {
                 days.forEach { day ->
-                    AttendanceHeaderCell("${day}日")
+                    AttendanceHeaderCell("${day}", width = dayColumnWidth)
                 }
-                AttendanceHeaderCell("合计", width = 92.dp)
-                AttendanceHeaderCell("工资", width = 92.dp)
+                AttendanceHeaderCell("合计", width = summaryColumnWidth)
+                AttendanceHeaderCell("工资", width = summaryColumnWidth)
             }
-
-            rows.forEach { row ->
-                Row {
-                    days.forEach { day ->
-                        AttendanceDayCell(
-                            cell = row.cellsByDay[day],
-                            salaryMode = row.summary.salaryMode,
-                            workerName = row.summary.workerName,
-                            day = day,
-                            onOpenDetail = { cell ->
-                                val date = "$month-${day.toString().padStart(2, '0')}"
-                                if (cell == null || cell.records.isEmpty()) {
-                                    onAddRecord(row.summary.workerId, row.summary.workerName, row.summary.salaryMode, date)
-                                } else {
-                                    selectedDetail = AttendanceCellDetail(
-                                        workerId = row.summary.workerId,
-                                        workerName = row.summary.workerName,
-                                        salaryMode = row.summary.salaryMode,
-                                        day = day,
-                                        cell = cell,
-                                    )
-                                }
-                            },
+            Column(
+                modifier = if (enableVerticalScroll) {
+                    Modifier
+                } else {
+                    Modifier.heightIn(max = if (compactWidth) 430.dp else 520.dp).verticalScroll(verticalScrollState)
+                }.horizontalScroll(horizontalScrollState),
+            ) {
+                rows.forEach { row ->
+                    Row {
+                        days.forEach { day ->
+                            AttendanceDayCell(
+                                cell = row.cellsByDay[day],
+                                width = dayColumnWidth,
+                                onOpenDetail = { cell ->
+                                    val date = "$month-${day.toString().padStart(2, '0')}"
+                                    if (cell == null || cell.records.isEmpty()) {
+                                        onAddRecord(row.summary.workerId, row.summary.workerName, date)
+                                    } else {
+                                        selectedDetail = AttendanceCellDetail(
+                                            workerId = row.summary.workerId,
+                                            workerName = row.summary.workerName,
+                                            day = day,
+                                            cell = cell,
+                                        )
+                                    }
+                                },
+                            )
+                        }
+                        AttendanceBodyCell(
+                            text = formatSummaryValue(row.summary.totalWorkHours, row.summary.totalPresentDays),
+                            width = summaryColumnWidth,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        AttendanceBodyCell(
+                            text = "¥${formatAttendanceNumber(row.summary.totalSalary)}",
+                            width = summaryColumnWidth,
+                            fontWeight = FontWeight.Bold,
                         )
                     }
+                }
+                Row {
+                    days.forEach { _ ->
+                        AttendanceBodyCell("", width = dayColumnWidth)
+                    }
                     AttendanceBodyCell(
-                        text = if (row.summary.salaryMode == SalaryMode.HOURLY) {
-                            "${formatAttendanceNumber(row.summary.totalWorkHours)}h"
-                        } else {
-                            "${row.summary.totalPresentDays}天"
-                        },
-                        width = 92.dp,
+                        text = "${formatAttendanceNumber(totalHours)}h / ${totalDays}天",
+                        width = summaryColumnWidth,
                         fontWeight = FontWeight.Bold,
                     )
                     AttendanceBodyCell(
-                        text = "¥${formatAttendanceNumber(row.summary.totalSalary)}",
-                        width = 92.dp,
+                        text = "¥${formatAttendanceNumber(totalSalary)}",
+                        width = summaryColumnWidth,
                         fontWeight = FontWeight.Bold,
                     )
                 }
-            }
-            Row {
-                days.forEach { _ ->
-                    AttendanceBodyCell("")
-                }
-                AttendanceBodyCell(
-                    text = "${formatAttendanceNumber(totalHours)}h / ${totalDays}天",
-                    width = 92.dp,
-                    fontWeight = FontWeight.Bold,
-                )
-                AttendanceBodyCell(
-                    text = "¥${formatAttendanceNumber(totalSalary)}",
-                    width = 92.dp,
-                    fontWeight = FontWeight.Bold,
-                )
             }
         }
     }
@@ -163,7 +178,7 @@ fun AttendanceBoardScreen(
                                 TextButton(
                                     onClick = {
                                         selectedDetail = null
-                                        onEditRecord(detail.workerId, detail.workerName, detail.salaryMode, record)
+                                        onEditRecord(detail.workerId, detail.workerName, record)
                                     },
                                 ) {
                                     Text("修改")
@@ -186,7 +201,7 @@ fun AttendanceBoardScreen(
                     onClick = {
                         val date = "$month-${detail.day.toString().padStart(2, '0')}"
                         selectedDetail = null
-                        onAddRecord(detail.workerId, detail.workerName, detail.salaryMode, date)
+                        onAddRecord(detail.workerId, detail.workerName, date)
                     },
                 ) {
                     Text("再加一条")
@@ -204,26 +219,25 @@ fun AttendanceBoardScreen(
 @Composable
 private fun AttendanceDayCell(
     cell: AttendanceDayCell?,
-    salaryMode: Int,
-    workerName: String,
-    day: Int,
+    width: Dp,
     onOpenDetail: (AttendanceDayCell?) -> Unit,
 ) {
     val text = when {
         cell == null -> ""
-        salaryMode == SalaryMode.HOURLY && cell.totalWorkHours > 0.0 -> {
+        cell.totalWorkHours > 0.0 -> {
             val suffix = if (cell.segmentCount > 1) "(${cell.segmentCount})" else ""
             "${formatAttendanceNumber(cell.totalWorkHours)}h$suffix"
         }
-        salaryMode == SalaryMode.DAILY && cell.isPresent -> "✓"
+        cell.isPresent -> "✓"
         else -> ""
     }
     AttendanceBodyCell(
         text = text,
+        width = width,
         backgroundColor = if (cell != null && (cell.totalWorkHours > 0.0 || cell.isPresent)) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
         } else {
-            MaterialTheme.colorScheme.background
+            MaterialTheme.colorScheme.surface
         },
         onClick = { onOpenDetail(cell) },
     )
@@ -232,7 +246,6 @@ private fun AttendanceDayCell(
 private data class AttendanceCellDetail(
     val workerId: Long,
     val workerName: String,
-    val salaryMode: Int,
     val day: Int,
     val cell: AttendanceDayCell,
 )
@@ -240,11 +253,10 @@ private data class AttendanceCellDetail(
 @Composable
 private fun AttendanceNameCell(
     name: String,
-    salaryMode: Int,
+    width: Dp,
 ) {
-    val modeText = if (salaryMode == SalaryMode.HOURLY) "计时" else "计天"
     Column(
-        modifier = cellModifier(width = 104.dp)
+        modifier = cellModifier(width = width)
             .defaultMinSize(minHeight = 52.dp)
             .background(MaterialTheme.colorScheme.surface),
         verticalArrangement = Arrangement.Center,
@@ -252,15 +264,9 @@ private fun AttendanceNameCell(
         Text(
             text = name,
             modifier = Modifier.padding(horizontal = 8.dp),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Bold,
-            maxLines = 1,
-        )
-        Text(
-            text = modeText,
-            modifier = Modifier.padding(horizontal = 8.dp),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
         )
     }
 }
@@ -308,7 +314,7 @@ private fun AttendanceBodyCell(
             style = MaterialTheme.typography.bodySmall,
             fontWeight = fontWeight,
             textAlign = TextAlign.Center,
-            maxLines = 1,
+            maxLines = 2,
         )
     }
 }
@@ -324,5 +330,14 @@ private fun formatAttendanceNumber(value: Double): String {
         String.format(Locale.getDefault(), "%.0f", value)
     } else {
         String.format(Locale.getDefault(), "%.1f", value)
+    }
+}
+
+private fun formatSummaryValue(totalHours: Double, totalDays: Int): String {
+    return when {
+        totalHours > 0.0 && totalDays > 0 -> "${formatAttendanceNumber(totalHours)}h/${totalDays}天"
+        totalHours > 0.0 -> "${formatAttendanceNumber(totalHours)}h"
+        totalDays > 0 -> "${totalDays}天"
+        else -> ""
     }
 }

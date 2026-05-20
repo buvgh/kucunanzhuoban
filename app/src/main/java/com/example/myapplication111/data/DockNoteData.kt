@@ -234,6 +234,7 @@ data class AttendanceEntity(
     val projectId: Long,
     val workerId: Long,
     val date: String,
+    val salaryModeSnapshot: Int = SalaryMode.HOURLY,
     val startTime: String? = null,
     val endTime: String? = null,
     val workHours: Double = 0.0,
@@ -254,6 +255,11 @@ data class AttendanceSummary(
 data class AttendanceDashboardRow(
     val summary: AttendanceSummary,
     val cellsByDay: Map<Int, AttendanceDayCell>,
+)
+
+data class AttendanceMonthBoard(
+    val month: String,
+    val rows: List<AttendanceDashboardRow>,
 )
 
 data class AttendanceDayCell(
@@ -475,7 +481,7 @@ interface DayPhotoDao {
 
 @Dao
 interface WorkerDao {
-    @Query("SELECT * FROM workers WHERE projectId = :projectId ORDER BY id DESC")
+    @Query("SELECT * FROM workers WHERE projectId = :projectId ORDER BY id ASC")
     fun observeForProject(projectId: Long): Flow<List<WorkerEntity>>
 
     @Query("SELECT * FROM workers WHERE id = :workerId LIMIT 1")
@@ -502,18 +508,21 @@ interface AttendanceDao {
     @Query("SELECT * FROM attendance_records WHERE projectId = :projectId AND substr(date, 1, 7) = :month ORDER BY date ASC, id ASC")
     fun observeForProjectMonth(projectId: Long, month: String): Flow<List<AttendanceEntity>>
 
+    @Query("SELECT DISTINCT substr(date, 1, 7) FROM attendance_records WHERE projectId = :projectId ORDER BY substr(date, 1, 7) DESC")
+    fun observeMonthsForProject(projectId: Long): Flow<List<String>>
+
     @Query(
         """
         SELECT
             w.id AS workerId,
             w.name AS workerName,
-            w.salaryMode AS salaryMode,
-            COALESCE(SUM(CASE WHEN w.salaryMode = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
-            CAST(COALESCE(COUNT(DISTINCT CASE WHEN w.salaryMode = 1 AND a.isPresent = 1 THEN a.date END), 0) AS INTEGER) AS totalPresentDays,
+            COALESCE(MAX(a.salaryModeSnapshot), 0) AS salaryMode,
+            COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
+            CAST(COALESCE(COUNT(DISTINCT CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.date END), 0) AS INTEGER) AS totalPresentDays,
             COALESCE(SUM(
                 CASE
-                    WHEN w.salaryMode = 0 THEN a.workHours * a.hourlyRateSnapshot
-                    WHEN w.salaryMode = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
+                    WHEN a.salaryModeSnapshot = 0 THEN a.workHours * a.hourlyRateSnapshot
+                    WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
                     ELSE 0
                 END
             ), 0) AS totalSalary
@@ -523,7 +532,7 @@ interface AttendanceDao {
             AND a.projectId = :projectId
             AND substr(a.date, 1, 7) = :month
         WHERE w.projectId = :projectId
-        GROUP BY w.id, w.name, w.salaryMode
+        GROUP BY w.id, w.name
         ORDER BY w.id DESC
         """
     )
@@ -534,26 +543,23 @@ interface AttendanceDao {
         SELECT
             p.id AS projectId,
             p.name AS projectName,
-            COALESCE(SUM(CASE WHEN w.salaryMode = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
-            CAST(COALESCE(COUNT(DISTINCT CASE WHEN w.salaryMode = 1 AND a.isPresent = 1 THEN a.workerId || '-' || a.date END), 0) AS INTEGER) AS totalPresentDays,
+            COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
+            CAST(COALESCE(COUNT(DISTINCT CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.workerId || '-' || a.date END), 0) AS INTEGER) AS totalPresentDays,
             COALESCE(SUM(
                 CASE
-                    WHEN w.salaryMode = 0 THEN a.workHours * a.hourlyRateSnapshot
-                    WHEN w.salaryMode = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
+                    WHEN a.salaryModeSnapshot = 0 THEN a.workHours * a.hourlyRateSnapshot
+                    WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
                     ELSE 0
                 END
             ), 0) AS totalSalary
         FROM projects AS p
         LEFT JOIN attendance_records AS a
             ON a.projectId = p.id
-            AND substr(a.date, 1, 7) = :month
-        LEFT JOIN workers AS w
-            ON w.id = a.workerId
         GROUP BY p.id, p.name
         ORDER BY p.createTime DESC
         """
     )
-    fun observeProjectAttendanceSummaries(month: String): Flow<List<AttendanceProjectSummary>>
+    fun observeProjectAttendanceSummaries(): Flow<List<AttendanceProjectSummary>>
 
     @Query("SELECT * FROM attendance_records WHERE id = :attendanceId LIMIT 1")
     suspend fun getById(attendanceId: Long): AttendanceEntity?
@@ -582,7 +588,7 @@ interface AttendanceDao {
         WorkerEntity::class,
         AttendanceEntity::class,
     ],
-    version = 8,
+    version = 9,
     exportSchema = false,
 )
 abstract class DockNoteDatabase : RoomDatabase() {
@@ -734,6 +740,12 @@ abstract class DockNoteDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE attendance_records ADD COLUMN salaryModeSnapshot INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getInstance(context: Context): DockNoteDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -748,6 +760,7 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     MIGRATION_5_6,
                     MIGRATION_6_7,
                     MIGRATION_7_8,
+                    MIGRATION_8_9,
                 ).build().also { instance = it }
             }
         }
@@ -1203,9 +1216,8 @@ class DockNoteRepository private constructor(
         return attendanceDao.observeProjectMonthlySummary(projectId, month)
     }
 
-    fun observeProjectAttendanceSummaries(month: String): Flow<List<AttendanceProjectSummary>> {
-        require(month.matches(Regex("""\d{4}-\d{2}"""))) { "月份格式必须为 yyyy-MM" }
-        return attendanceDao.observeProjectAttendanceSummaries(month)
+    fun observeProjectAttendanceSummaries(): Flow<List<AttendanceProjectSummary>> {
+        return attendanceDao.observeProjectAttendanceSummaries()
     }
 
     fun observeMonthlyAttendanceDashboard(projectId: Long, month: String): Flow<List<AttendanceDashboardRow>> {
@@ -1236,12 +1248,31 @@ class DockNoteRepository private constructor(
         }
     }
 
+    fun observeAttendanceMonthBoards(projectId: Long): Flow<List<AttendanceMonthBoard>> {
+        return attendanceDao.observeMonthsForProject(projectId).flatMapLatest { months ->
+            if (months.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                combine(months.map { month ->
+                    observeMonthlyAttendanceDashboard(projectId, month)
+                }) { monthRows ->
+                    months.mapIndexed { index, month ->
+                        AttendanceMonthBoard(
+                            month = month,
+                            rows = monthRows[index] as List<AttendanceDashboardRow>,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
     suspend fun createWorker(
         projectId: Long,
         name: String,
-        salaryMode: Int,
-        hourlyRate: Double,
-        dailyRate: Double,
+        salaryMode: Int = SalaryMode.HOURLY,
+        hourlyRate: Double = 0.0,
+        dailyRate: Double = 0.0,
     ): Long {
         val normalizedName = name.trim()
         require(normalizedName.isNotBlank()) { "人员姓名不能为空" }
@@ -1287,6 +1318,7 @@ class DockNoteRepository private constructor(
         projectId: Long,
         workerId: Long,
         date: String,
+        salaryMode: Int,
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
@@ -1300,6 +1332,7 @@ class DockNoteRepository private constructor(
             projectId = projectId,
             worker = worker,
             date = date,
+            salaryMode = salaryMode,
             startTime = startTime,
             endTime = endTime,
             isPresent = isPresent,
@@ -1313,6 +1346,7 @@ class DockNoteRepository private constructor(
     suspend fun updateAttendanceRecord(
         attendanceId: Long,
         date: String,
+        salaryMode: Int,
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
@@ -1327,6 +1361,7 @@ class DockNoteRepository private constructor(
             projectId = existing.projectId,
             worker = worker,
             date = date,
+            salaryMode = salaryMode,
             startTime = startTime,
             endTime = endTime,
             isPresent = isPresent,
@@ -1353,6 +1388,7 @@ class DockNoteRepository private constructor(
         projectId: Long,
         worker: WorkerEntity,
         date: String,
+        salaryMode: Int,
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
@@ -1362,7 +1398,7 @@ class DockNoteRepository private constructor(
         val normalizedDate = date.trim()
         require(normalizedDate.isNotBlank()) { "考勤日期不能为空" }
 
-        return when (worker.salaryMode) {
+        return when (salaryMode) {
             SalaryMode.HOURLY -> {
                 val start = startTime?.trim().orEmpty()
                 val end = endTime?.trim().orEmpty()
@@ -1375,6 +1411,7 @@ class DockNoteRepository private constructor(
                     projectId = projectId,
                     workerId = worker.id,
                     date = normalizedDate,
+                    salaryModeSnapshot = SalaryMode.HOURLY,
                     startTime = start,
                     endTime = end,
                     workHours = AttendanceCalculator.calculateWorkHours(start, end),
@@ -1391,6 +1428,7 @@ class DockNoteRepository private constructor(
                     projectId = projectId,
                     workerId = worker.id,
                     date = normalizedDate,
+                    salaryModeSnapshot = SalaryMode.DAILY,
                     startTime = null,
                     endTime = null,
                     workHours = 0.0,
@@ -1399,7 +1437,7 @@ class DockNoteRepository private constructor(
                     dailyRateSnapshot = normalizedDailyRate,
                 )
             }
-            else -> error("计薪模式不合法")
+            else -> error("考勤模式不合法")
         }
     }
 
