@@ -158,6 +158,27 @@ data class StorageRecordEntity(
 )
 
 @Entity(
+    tableName = "secondary_sale_records",
+    foreignKeys = [
+        ForeignKey(
+            entity = RecordDateEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["dateId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("dateId")],
+)
+data class SecondarySaleRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val dateId: Long,
+    val name: String,
+    val weight: Double,
+    val unitPrice: Double,
+    val totalAmount: Double,
+)
+
+@Entity(
     tableName = "fee_records",
     foreignKeys = [
         ForeignKey(
@@ -298,6 +319,13 @@ data class FeeSummary(
     val totalAmount: Double,
 )
 
+data class SecondarySaleSummary(
+    val name: String,
+    val totalWeight: Double,
+    val totalAmount: Double,
+    val averageUnitPrice: Double,
+)
+
 data class Totals(
     val totalCount: Double = 0.0,
     val totalWeight: Double = 0.0,
@@ -306,6 +334,8 @@ data class Totals(
     val totalOutboundWeight: Double = 0.0,
     val netTotalCount: Double = 0.0,
     val netTotalWeight: Double = 0.0,
+    val totalSecondarySaleWeight: Double = 0.0,
+    val totalSecondarySaleAmount: Double = 0.0,
     val laborFee: Double = 0.0,
     val agencyFee: Double = 0.0,
     val loadingFee: Double = 0.0,
@@ -315,6 +345,7 @@ data class Totals(
     val totalDebt: Double = 0.0,
     val itemSummaries: List<ItemSummary> = emptyList(),
     val feeSummaries: List<FeeSummary> = emptyList(),
+    val secondarySaleSummaries: List<SecondarySaleSummary> = emptyList(),
 )
 
 data class ProjectSummaryUi(
@@ -355,6 +386,7 @@ data class DayDetailUi(
     val projectTotals: Totals, // Add project-level totals for debt info
     val photos: List<DayPhotoEntity>,
     val storageRecords: List<StorageRecordEntity>,
+    val secondarySaleRecords: List<SecondarySaleRecordEntity>,
     val outboundRecords: List<OutboundRecordEntity>,
     val feeRecords: List<FeeRecordEntity>,
 )
@@ -447,6 +479,24 @@ interface StorageRecordDao {
 
     @Query("SELECT weightPerUnit FROM storage_records WHERE name = :name ORDER BY id DESC LIMIT 1")
     suspend fun getLastWeightForItem(name: String): Double?
+}
+
+@Dao
+interface SecondarySaleRecordDao {
+    @Query("SELECT * FROM secondary_sale_records ORDER BY id DESC")
+    fun observeAll(): Flow<List<SecondarySaleRecordEntity>>
+
+    @Query("SELECT * FROM secondary_sale_records WHERE dateId = :dateId ORDER BY id DESC")
+    fun observeForDate(dateId: Long): Flow<List<SecondarySaleRecordEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(record: SecondarySaleRecordEntity): Long
+
+    @Update
+    suspend fun update(record: SecondarySaleRecordEntity)
+
+    @Delete
+    suspend fun delete(record: SecondarySaleRecordEntity)
 }
 
 @Dao
@@ -581,6 +631,7 @@ interface AttendanceDao {
         ProjectGroupProjectEntity::class,
         RecordDateEntity::class,
         StorageRecordEntity::class,
+        SecondarySaleRecordEntity::class,
         FeeRecordEntity::class,
         DayPhotoEntity::class,
         OutboundRecordEntity::class,
@@ -588,7 +639,7 @@ interface AttendanceDao {
         WorkerEntity::class,
         AttendanceEntity::class,
     ],
-    version = 9,
+    version = 11,
     exportSchema = false,
 )
 abstract class DockNoteDatabase : RoomDatabase() {
@@ -596,6 +647,7 @@ abstract class DockNoteDatabase : RoomDatabase() {
     abstract fun projectGroupDao(): ProjectGroupDao
     abstract fun recordDateDao(): RecordDateDao
     abstract fun storageRecordDao(): StorageRecordDao
+    abstract fun secondarySaleRecordDao(): SecondarySaleRecordDao
     abstract fun feeRecordDao(): FeeRecordDao
     abstract fun dayPhotoDao(): DayPhotoDao
     abstract fun outboundRecordDao(): OutboundRecordDao
@@ -746,6 +798,55 @@ abstract class DockNoteDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS secondary_sale_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        dateId INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        weight REAL NOT NULL,
+                        unitPrice REAL NOT NULL DEFAULT 0,
+                        totalAmount REAL NOT NULL DEFAULT 0,
+                        FOREIGN KEY(dateId) REFERENCES record_dates(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_secondary_sale_records_dateId ON secondary_sale_records(dateId)")
+            }
+        }
+
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS secondary_sale_records_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        dateId INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        weight REAL NOT NULL,
+                        unitPrice REAL NOT NULL,
+                        totalAmount REAL NOT NULL,
+                        FOREIGN KEY(dateId) REFERENCES record_dates(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    INSERT INTO secondary_sale_records_new (id, dateId, name, weight, unitPrice, totalAmount)
+                    SELECT id, dateId, name, weight,
+                           CASE WHEN weight = 0 THEN 0 ELSE amount / weight END,
+                           amount
+                    FROM secondary_sale_records
+                    """.trimIndent(),
+                )
+                db.execSQL("DROP TABLE secondary_sale_records")
+                db.execSQL("ALTER TABLE secondary_sale_records_new RENAME TO secondary_sale_records")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_secondary_sale_records_dateId ON secondary_sale_records(dateId)")
+            }
+        }
+
         fun getInstance(context: Context): DockNoteDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -761,6 +862,8 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     MIGRATION_6_7,
                     MIGRATION_7_8,
                     MIGRATION_8_9,
+                    MIGRATION_9_10,
+                    MIGRATION_10_11,
                 ).build().also { instance = it }
             }
         }
@@ -772,6 +875,7 @@ class DockNoteRepository private constructor(
     private val projectGroupDao: ProjectGroupDao,
     private val dateDao: RecordDateDao,
     private val storageDao: StorageRecordDao,
+    private val secondarySaleDao: SecondarySaleRecordDao,
     private val feeDao: FeeRecordDao,
     private val dayPhotoDao: DayPhotoDao,
     private val outboundDao: OutboundRecordDao,
@@ -784,6 +888,7 @@ class DockNoteRepository private constructor(
             projectDao.observeAll(),
             dateDao.observeAll(),
             storageDao.observeAll(),
+            secondarySaleDao.observeAll(),
             feeDao.observeAll(),
             outboundDao.observeAll(),
             QueryAllPaymentsFlow(),
@@ -791,12 +896,14 @@ class DockNoteRepository private constructor(
             val projects = flows[0] as List<ProjectEntity>
             val dates = flows[1] as List<RecordDateEntity>
             val storageRecords = flows[2] as List<StorageRecordEntity>
-            val feeRecords = flows[3] as List<FeeRecordEntity>
-            val outboundRecords = flows[4] as List<OutboundRecordEntity>
-            val paymentRecords = flows[5] as List<PaymentRecordEntity>
+            val secondarySaleRecords = flows[3] as List<SecondarySaleRecordEntity>
+            val feeRecords = flows[4] as List<FeeRecordEntity>
+            val outboundRecords = flows[5] as List<OutboundRecordEntity>
+            val paymentRecords = flows[6] as List<PaymentRecordEntity>
 
             val datesByProject = dates.groupBy { it.projectId }
             val storageByDate = storageRecords.groupBy { it.dateId }
+            val secondarySalesByDate = secondarySaleRecords.groupBy { it.dateId }
             val feeByDate = feeRecords.groupBy { it.dateId }
             val outboundByDate = outboundRecords.groupBy { it.dateId }
             val paymentsByProject = paymentRecords.groupBy { it.projectId }
@@ -806,6 +913,7 @@ class DockNoteRepository private constructor(
                 val dateIds = projectDates.map { it.id }
                 
                 val projectStorage = dateIds.flatMap { storageByDate[it] ?: emptyList() }
+                val projectSecondarySales = dateIds.flatMap { secondarySalesByDate[it] ?: emptyList() }
                 val projectFees = dateIds.flatMap { feeByDate[it] ?: emptyList() }
                 val projectOutbound = dateIds.flatMap { outboundByDate[it] ?: emptyList() }
                 val projectPayments = paymentsByProject[project.id] ?: emptyList()
@@ -814,7 +922,7 @@ class DockNoteRepository private constructor(
                     id = project.id,
                     name = project.name,
                     createTime = project.createTime,
-                    totals = buildTotals(projectStorage, projectOutbound, projectFees, projectPayments),
+                    totals = buildTotals(projectStorage, projectSecondarySales, projectOutbound, projectFees, projectPayments),
                 )
             }
         }
@@ -863,6 +971,7 @@ class DockNoteRepository private constructor(
             projectDao.observeById(projectId),
             dateDao.observeForProject(projectId),
             storageDao.observeAll(),
+            secondarySaleDao.observeAll(),
             feeDao.observeAll(),
             outboundDao.observeAll(),
             paymentDao.observeForProject(projectId),
@@ -870,35 +979,39 @@ class DockNoteRepository private constructor(
             val project = flows[0] as ProjectEntity?
             val dates = flows[1] as List<RecordDateEntity>
             val storageRecords = flows[2] as List<StorageRecordEntity>
-            val feeRecords = flows[3] as List<FeeRecordEntity>
-            val outboundRecords = flows[4] as List<OutboundRecordEntity>
-            val payments = flows[5] as List<PaymentRecordEntity>
+            val secondarySaleRecords = flows[3] as List<SecondarySaleRecordEntity>
+            val feeRecords = flows[4] as List<FeeRecordEntity>
+            val outboundRecords = flows[5] as List<OutboundRecordEntity>
+            val payments = flows[6] as List<PaymentRecordEntity>
 
             project?.let {
                 val storageByDate = storageRecords.groupBy { it.dateId }
+                val secondarySalesByDate = secondarySaleRecords.groupBy { it.dateId }
                 val feeByDate = feeRecords.groupBy { it.dateId }
                 val outboundByDate = outboundRecords.groupBy { it.dateId }
 
                 val dateSummaries = dates.map { date ->
                     val dayStorageRecords = storageByDate[date.id] ?: emptyList()
+                    val daySecondarySaleRecords = secondarySalesByDate[date.id] ?: emptyList()
                     val dayFeeRecords = feeByDate[date.id] ?: emptyList()
                     val dayOutboundRecords = outboundByDate[date.id] ?: emptyList()
                     DateSummaryUi(
                         id = date.id,
                         date = date.date,
-                        totals = buildTotals(dayStorageRecords, dayOutboundRecords, dayFeeRecords),
+                        totals = buildTotals(dayStorageRecords, daySecondarySaleRecords, dayOutboundRecords, dayFeeRecords),
                     )
                 }
 
                 val dateIds = dates.map { it.id }
                 val projectStorage = dateIds.flatMap { storageByDate[it] ?: emptyList() }
+                val projectSecondarySales = dateIds.flatMap { secondarySalesByDate[it] ?: emptyList() }
                 val projectFees = dateIds.flatMap { feeByDate[it] ?: emptyList() }
                 val projectOutbound = dateIds.flatMap { outboundByDate[it] ?: emptyList() }
 
                 ProjectOverviewUi(
                     id = it.id,
                     name = it.name,
-                    totals = buildTotals(projectStorage, projectOutbound, projectFees, payments),
+                    totals = buildTotals(projectStorage, projectSecondarySales, projectOutbound, projectFees, payments),
                     dates = dateSummaries,
                     paymentRecords = payments,
                 )
@@ -913,6 +1026,7 @@ class DockNoteRepository private constructor(
             dateDao.observeById(dateId),
             dayPhotoDao.observeForDate(dateId),
             storageDao.observeAll(), // Observe all storage for project totals
+            secondarySaleDao.observeAll(),
             feeDao.observeAll(),     // Observe all fees for project totals
             outboundDao.observeAll(), // Observe all outbound for project totals
             paymentDao.observeForProject(projectId),
@@ -922,23 +1036,27 @@ class DockNoteRepository private constructor(
             val date = array[2] as RecordDateEntity?
             val photos = array[3] as List<DayPhotoEntity>
             val storageRecords = array[4] as List<StorageRecordEntity>
-            val feeRecords = array[5] as List<FeeRecordEntity>
-            val outboundRecords = array[6] as List<OutboundRecordEntity>
-            val projectPayments = array[7] as List<PaymentRecordEntity>
+            val secondarySaleRecords = array[5] as List<SecondarySaleRecordEntity>
+            val feeRecords = array[6] as List<FeeRecordEntity>
+            val outboundRecords = array[7] as List<OutboundRecordEntity>
+            val projectPayments = array[8] as List<PaymentRecordEntity>
 
             if (project == null || date == null || date.projectId != projectId) {
                 null
             } else {
                 val storageByDate = storageRecords.groupBy { it.dateId }
+                val secondarySalesByDate = secondarySaleRecords.groupBy { it.dateId }
                 val feeByDate = feeRecords.groupBy { it.dateId }
                 val outboundByDate = outboundRecords.groupBy { it.dateId }
 
                 val dayStorage = storageByDate[date.id] ?: emptyList()
+                val daySecondarySales = secondarySalesByDate[date.id] ?: emptyList()
                 val dayFee = feeByDate[date.id] ?: emptyList()
                 val dayOutbound = outboundByDate[date.id] ?: emptyList()
 
                 val projectDateIds = projectDates.map { it.id }
                 val projectStorage = projectDateIds.flatMap { storageByDate[it] ?: emptyList() }
+                val projectSecondarySales = projectDateIds.flatMap { secondarySalesByDate[it] ?: emptyList() }
                 val projectFees = projectDateIds.flatMap { feeByDate[it] ?: emptyList() }
                 val projectOutbound = projectDateIds.flatMap { outboundByDate[it] ?: emptyList() }
 
@@ -947,10 +1065,11 @@ class DockNoteRepository private constructor(
                     projectName = project.name,
                     dateId = date.id,
                     date = date.date,
-                    totals = buildTotals(dayStorage, dayOutbound, dayFee),
-                    projectTotals = buildTotals(projectStorage, projectOutbound, projectFees, projectPayments),
+                    totals = buildTotals(dayStorage, daySecondarySales, dayOutbound, dayFee),
+                    projectTotals = buildTotals(projectStorage, projectSecondarySales, projectOutbound, projectFees, projectPayments),
                     photos = photos,
                     storageRecords = dayStorage,
+                    secondarySaleRecords = daySecondarySales,
                     outboundRecords = dayOutbound,
                     feeRecords = dayFee,
                 )
@@ -1057,6 +1176,43 @@ class DockNoteRepository private constructor(
 
     suspend fun deleteStorageRecord(record: StorageRecordEntity) {
         storageDao.delete(record)
+    }
+
+    suspend fun addSecondarySaleRecord(
+        dateId: Long,
+        name: String,
+        weight: Double,
+        unitPrice: Double,
+    ) {
+        secondarySaleDao.insert(
+            SecondarySaleRecordEntity(
+                dateId = dateId,
+                name = name.trim(),
+                weight = weight,
+                unitPrice = unitPrice,
+                totalAmount = weight * unitPrice,
+            ),
+        )
+    }
+
+    suspend fun updateSecondarySaleRecord(
+        record: SecondarySaleRecordEntity,
+        name: String,
+        weight: Double,
+        unitPrice: Double,
+    ) {
+        secondarySaleDao.update(
+            record.copy(
+                name = name.trim(),
+                weight = weight,
+                unitPrice = unitPrice,
+                totalAmount = weight * unitPrice,
+            ),
+        )
+    }
+
+    suspend fun deleteSecondarySaleRecord(record: SecondarySaleRecordEntity) {
+        secondarySaleDao.delete(record)
     }
 
     suspend fun addFeeRecord(dateId: Long, type: String, amount: Double) {
@@ -1458,6 +1614,7 @@ class DockNoteRepository private constructor(
 
     private fun buildTotals(
         storageRecords: List<StorageRecordEntity>,
+        secondarySaleRecords: List<SecondarySaleRecordEntity>,
         outboundRecords: List<OutboundRecordEntity>,
         feeRecords: List<FeeRecordEntity>,
         paymentRecords: List<PaymentRecordEntity> = emptyList(),
@@ -1472,6 +1629,8 @@ class DockNoteRepository private constructor(
         val totalStorageCount = storageRecords.sumOf { it.count }
         val totalStorageWeight = storageRecords.sumOf { it.totalWeight }
         val totalStorageAmount = storageRecords.sumOf { it.totalPrice }
+        val totalSecondarySaleWeight = secondarySaleRecords.sumOf { it.weight }
+        val totalSecondarySaleAmount = secondarySaleRecords.sumOf { it.totalAmount }
 
         val totalOutboundCount = outboundRecords.sumOf { it.count }
         val totalOutboundWeight = outboundRecords.sumOf { it.count * it.weightPerUnit }
@@ -1495,6 +1654,15 @@ class DockNoteRepository private constructor(
             )
         }.sortedByDescending { it.totalAmount }
 
+        val secondarySaleSummaries = secondarySaleRecords.groupBy { it.name }.map { (name, records) ->
+            SecondarySaleSummary(
+                name = name,
+                totalWeight = records.sumOf { it.weight },
+                totalAmount = records.sumOf { it.totalAmount },
+                averageUnitPrice = records.sumOf { it.totalAmount } / records.sumOf { it.weight }.coerceAtLeast(1.0),
+            )
+        }.sortedByDescending { it.totalAmount }
+
         return Totals(
             totalCount = totalStorageCount,
             totalWeight = totalStorageWeight,
@@ -1503,6 +1671,8 @@ class DockNoteRepository private constructor(
             totalOutboundWeight = totalOutboundWeight,
             netTotalCount = totalStorageCount - totalOutboundCount,
             netTotalWeight = totalStorageWeight - totalOutboundWeight,
+            totalSecondarySaleWeight = totalSecondarySaleWeight,
+            totalSecondarySaleAmount = totalSecondarySaleAmount,
             laborFee = laborFee,
             agencyFee = agencyFee,
             loadingFee = loadingFee,
@@ -1512,6 +1682,7 @@ class DockNoteRepository private constructor(
             totalDebt = totalAmountNeeded - totalPaid,
             itemSummaries = itemSummaries,
             feeSummaries = feeSummaries,
+            secondarySaleSummaries = secondarySaleSummaries,
         )
     }
 
@@ -1543,6 +1714,8 @@ class DockNoteRepository private constructor(
             totalOutboundWeight = totals.sumOf { it.totalOutboundWeight },
             netTotalCount = totals.sumOf { it.netTotalCount },
             netTotalWeight = totals.sumOf { it.netTotalWeight },
+            totalSecondarySaleWeight = totals.sumOf { it.totalSecondarySaleWeight },
+            totalSecondarySaleAmount = totals.sumOf { it.totalSecondarySaleAmount },
             laborFee = totals.sumOf { it.laborFee },
             agencyFee = totals.sumOf { it.agencyFee },
             loadingFee = totals.sumOf { it.loadingFee },
@@ -1552,6 +1725,18 @@ class DockNoteRepository private constructor(
             totalDebt = totals.sumOf { it.totalDebt },
             itemSummaries = itemSummaries,
             feeSummaries = feeSummaries,
+            secondarySaleSummaries = totals
+                .flatMap { it.secondarySaleSummaries }
+                .groupBy { it.name }
+                .map { (name, sales) ->
+                    SecondarySaleSummary(
+                        name = name,
+                        totalWeight = sales.sumOf { it.totalWeight },
+                        totalAmount = sales.sumOf { it.totalAmount },
+                        averageUnitPrice = sales.sumOf { it.totalAmount } / sales.sumOf { it.totalWeight }.coerceAtLeast(1.0),
+                    )
+                }
+                .sortedByDescending { it.totalAmount },
         )
     }
 
@@ -1567,6 +1752,7 @@ class DockNoteRepository private constructor(
                     projectGroupDao = db.projectGroupDao(),
                     dateDao = db.recordDateDao(),
                     storageDao = db.storageRecordDao(),
+                    secondarySaleDao = db.secondarySaleRecordDao(),
                     feeDao = db.feeRecordDao(),
                     dayPhotoDao = db.dayPhotoDao(),
                     outboundDao = db.outboundRecordDao(),

@@ -20,6 +20,7 @@ import com.example.myapplication111.data.FeeRecordEntity
 import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.PaymentRecordEntity
 import com.example.myapplication111.data.ProjectSummaryUi
+import com.example.myapplication111.data.SecondarySaleRecordEntity
 import com.example.myapplication111.data.StorageRecordEntity
 import com.example.myapplication111.data.WorkerEntity
 import com.example.myapplication111.util.BackupManager
@@ -151,6 +152,37 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     fun deleteStorageRecord(record: StorageRecordEntity) {
         viewModelScope.launch {
             repository.deleteStorageRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun addSecondarySaleRecord(
+        dateId: Long,
+        name: String,
+        weight: Double,
+        unitPrice: Double,
+    ) {
+        viewModelScope.launch {
+            repository.addSecondarySaleRecord(dateId, name, weight, unitPrice)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updateSecondarySaleRecord(
+        record: SecondarySaleRecordEntity,
+        name: String,
+        weight: Double,
+        unitPrice: Double,
+    ) {
+        viewModelScope.launch {
+            repository.updateSecondarySaleRecord(record, name, weight, unitPrice)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteSecondarySaleRecord(record: SecondarySaleRecordEntity) {
+        viewModelScope.launch {
+            repository.deleteSecondarySaleRecord(record)
             BackupManager.backupDatabase(getApplication())
         }
     }

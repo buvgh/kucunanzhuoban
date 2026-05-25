@@ -128,6 +128,7 @@ import com.example.myapplication111.data.ProjectOverviewUi
 import com.example.myapplication111.data.ProjectGroupSummaryUi
 import com.example.myapplication111.data.ProjectSummaryUi
 import com.example.myapplication111.data.SalaryMode
+import com.example.myapplication111.data.SecondarySaleRecordEntity
 import com.example.myapplication111.data.StorageRecordEntity
 import com.example.myapplication111.data.Totals
 import com.example.myapplication111.data.WorkerEntity
@@ -167,6 +168,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
 
     var showProjectDialog by rememberSaveable { mutableStateOf(false) }
     var showStorageDialog by rememberSaveable { mutableStateOf(false) }
+    var showSecondarySaleDialog by rememberSaveable { mutableStateOf(false) }
     var showOutboundDialog by rememberSaveable { mutableStateOf(false) }
     var showFeeDialog by rememberSaveable { mutableStateOf(false) }
     var showPaymentDialog by rememberSaveable { mutableStateOf(false) }
@@ -174,6 +176,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
     var showProjectGroupDialog by rememberSaveable { mutableStateOf(false) }
     var editingProjectGroup by remember { mutableStateOf<ProjectGroupSummaryUi?>(null) }
     var editingStorage by remember { mutableStateOf<StorageRecordEntity?>(null) }
+    var editingSecondarySale by remember { mutableStateOf<SecondarySaleRecordEntity?>(null) }
     var editingOutbound by remember { mutableStateOf<OutboundRecordEntity?>(null) }
     var editingFee by remember { mutableStateOf<FeeRecordEntity?>(null) }
     var editingPayment by remember { mutableStateOf<PaymentRecordEntity?>(null) }
@@ -285,16 +288,16 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             when (destinationRoute) {
                 Routes.DayDetail -> {
                     val fabColor = when (selectedDayTab) {
-                        2 -> MaterialTheme.colorScheme.secondary
+                        3 -> MaterialTheme.colorScheme.secondary
                         else -> MaterialTheme.colorScheme.primary
                     }
                     val fabIcon = when (selectedDayTab) {
-                        3 -> Icons.Default.Payments
-                        4 -> Icons.Default.Add // Photos handled differently maybe?
+                        4 -> Icons.Default.Payments
+                        5 -> Icons.Default.Add
                         else -> Icons.Default.Add
                     }
                     
-                    if (selectedDayTab != 0 && selectedDayTab != 4 && selectedDayTab != 5) {
+                    if (selectedDayTab != 0 && selectedDayTab != 5 && selectedDayTab != 6) {
                         FloatingActionButton(
                             onClick = {
                                 when (selectedDayTab) {
@@ -303,10 +306,14 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                                         showStorageDialog = true
                                     }
                                     2 -> {
+                                        editingSecondarySale = null
+                                        showSecondarySaleDialog = true
+                                    }
+                                    3 -> {
                                         editingOutbound = null
                                         showOutboundDialog = true
                                     }
-                                    3 -> {
+                                    4 -> {
                                         editingFee = null
                                         showFeeDialog = true
                                     }
@@ -317,7 +324,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         ) {
                             Icon(fabIcon, contentDescription = null)
                         }
-                    } else if (selectedDayTab == 4) {
+                    } else if (selectedDayTab == 5) {
                         FloatingActionButton(
                             onClick = {
                                 val projectId = currentProjectId
@@ -428,6 +435,11 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                                 showStorageDialog = true
                             },
                             onDeleteStorage = viewModel::deleteStorageRecord,
+                            onEditSecondarySale = {
+                                editingSecondarySale = it
+                                showSecondarySaleDialog = true
+                            },
+                            onDeleteSecondarySale = viewModel::deleteSecondarySaleRecord,
                             onEditOutbound = {
                                 editingOutbound = it
                                 showOutboundDialog = true
@@ -651,6 +663,33 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             onGetLastWeight = { name: String ->
                 viewModel.getLastWeightForItem(name)
             }
+        )
+    }
+
+    if (showSecondarySaleDialog && currentDayDetail != null) {
+        val detail = currentDayDetail
+        SecondarySaleRecordDialog(
+            record = editingSecondarySale,
+            onDismiss = {
+                showSecondarySaleDialog = false
+                editingSecondarySale = null
+            },
+            onConfirm = { name, weight, unitPrice ->
+                if (detail != null) {
+                    val record = editingSecondarySale
+                    if (record == null) {
+                        viewModel.addSecondarySaleRecord(detail.dateId, name, weight, unitPrice)
+                    } else {
+                        viewModel.updateSecondarySaleRecord(record, name, weight, unitPrice)
+                    }
+                    showSecondarySaleDialog = false
+                    editingSecondarySale = null
+                }
+            },
+            itemNames = itemNames,
+            onGetLastWeight = { name: String ->
+                viewModel.getLastWeightForItem(name)
+            },
         )
     }
 
@@ -1047,6 +1086,14 @@ private fun ProjectOverviewScreen(
                 isProjectTotal = true
             )
         }
+        if (overview.totals.secondarySaleSummaries.isNotEmpty()) {
+            item {
+                SecondarySaleSummaryCard(
+                    title = "卖出次果汇总",
+                    totals = overview.totals,
+                )
+            }
+        }
         
         item {
             SectionHeader("付款记录", actionLabel = "登记付款", onAction = onAddPayment)
@@ -1247,6 +1294,14 @@ private fun ProjectGroupScreen(
                     isProjectTotal = true,
                 )
             }
+            if (selectedGroup.totals.secondarySaleSummaries.isNotEmpty()) {
+                item {
+                    SecondarySaleSummaryCard(
+                        title = "${selectedGroup.name} · 卖出次果",
+                        totals = selectedGroup.totals,
+                    )
+                }
+            }
             item {
                 Text("包含项目", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
@@ -1374,6 +1429,8 @@ private fun DayDetailScreen(
     onDeletePhoto: (DayPhotoEntity) -> Unit,
     onEditStorage: (StorageRecordEntity) -> Unit,
     onDeleteStorage: (StorageRecordEntity) -> Unit,
+    onEditSecondarySale: (SecondarySaleRecordEntity) -> Unit,
+    onDeleteSecondarySale: (SecondarySaleRecordEntity) -> Unit,
     onEditOutbound: (OutboundRecordEntity) -> Unit,
     onDeleteOutbound: (OutboundRecordEntity) -> Unit,
     onEditFee: (FeeRecordEntity) -> Unit,
@@ -1390,7 +1447,7 @@ private fun DayDetailScreen(
     onExportCsv: (DayDetailUi) -> Unit,
     onExportPdf: (DayDetailUi) -> Unit,
 ) {
-    val tabs = listOf("汇总", "入库清单", "出库清单", "费用支出", "现场照片", "考勤表")
+    val tabs = listOf("汇总", "入库清单", "卖出次果", "出库清单", "费用支出", "现场照片", "考勤表")
     
     var selectedFeeTab by remember { mutableStateOf(0) }
     val feeCategories = listOf("全部", FeeTypes.LABOR, FeeTypes.AGENCY, FeeTypes.LOADING, "其他")
@@ -1478,6 +1535,14 @@ private fun DayDetailScreen(
                     item {
                         SummaryCard(title = "当日详细汇总", totals = detail.totals)
                     }
+                    if (detail.totals.secondarySaleSummaries.isNotEmpty()) {
+                        item {
+                            SecondarySaleSummaryCard(
+                                title = "当日卖出次果",
+                                totals = detail.totals,
+                            )
+                        }
+                    }
                 }
                 1 -> {
                     if (detail.storageRecords.isEmpty()) {
@@ -1493,6 +1558,19 @@ private fun DayDetailScreen(
                     }
                 }
                 2 -> {
+                    if (detail.secondarySaleRecords.isEmpty()) {
+                        item { EmptyState("暂无卖出次果记录") }
+                    } else {
+                        items(detail.secondarySaleRecords, key = { "secondary_${it.id}" }) { record ->
+                            SecondarySaleRecordCard(
+                                record = record,
+                                onEdit = { onEditSecondarySale(record) },
+                                onDelete = { onDeleteSecondarySale(record) },
+                            )
+                        }
+                    }
+                }
+                3 -> {
                     if (detail.outboundRecords.isEmpty()) {
                         item { EmptyState("暂无出库记录") }
                     } else {
@@ -1505,7 +1583,7 @@ private fun DayDetailScreen(
                         }
                     }
                 }
-                3 -> {
+                4 -> {
                     item {
                         SectionHeader("费用明细", onAction = onAddFee, actionLabel = "记一笔")
                         Spacer(modifier = Modifier.height(8.dp))
@@ -1562,7 +1640,7 @@ private fun DayDetailScreen(
                         }
                     }
                 }
-                4 -> {
+                5 -> {
                     item {
                         SectionHeader("现场照片", onAction = onTakePhoto, actionLabel = "去拍照")
                     }
@@ -1587,7 +1665,7 @@ private fun DayDetailScreen(
                         }
                     }
                 }
-                5 -> {
+                6 -> {
                     item {
                         AttendanceTabContent(
                             currentMonth = detail.date.take(7),
@@ -2000,6 +2078,68 @@ private fun StorageRecordCard(
 }
 
 @Composable
+private fun SecondarySaleRecordCard(
+    record: SecondarySaleRecordEntity,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Payments,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(record.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                }
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    InfoItem("斤数", "${formatNumber(record.weight)}斤", Modifier.weight(1f))
+                    InfoItem("单价", formatCurrency(record.unitPrice), Modifier.weight(1f))
+                    InfoItem("总额", formatCurrency(record.totalAmount), Modifier.weight(1f))
+                }
+            }
+            Column(modifier = Modifier.padding(start = 8.dp)) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, "编辑", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
+                }
+                IconButton(onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, "删除", modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
+                }
+            }
+        }
+    }
+
+    if (showDeleteConfirm) {
+        DeleteConfirmDialog(
+            title = "删除卖出次果记录",
+            message = "确定要删除“${record.name}”的卖出次果记录吗？",
+            onDismiss = { showDeleteConfirm = false },
+            onConfirm = {
+                showDeleteConfirm = false
+                onDelete()
+            },
+        )
+    }
+}
+
+@Composable
 private fun InfoItem(label: String, value: String, modifier: Modifier = Modifier) {
     Column(modifier = modifier) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -2263,6 +2403,148 @@ private fun OutboundRecordDialog(
 }
 
 @Composable
+private fun SecondarySaleRecordDialog(
+    record: SecondarySaleRecordEntity?,
+    itemNames: List<String>,
+    onGetLastWeight: suspend (String) -> Double?,
+    onDismiss: () -> Unit,
+    onConfirm: (String, Double, Double) -> Unit,
+) {
+    var name by remember(record?.id) { mutableStateOf(record?.name.orEmpty()) }
+    var weight by remember(record?.id) { mutableStateOf(record?.weight?.toText().orEmpty()) }
+    var unitPrice by remember(record?.id) { mutableStateOf(record?.unitPrice?.toText().orEmpty()) }
+    var showHistory by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val nameInteractionSource = remember { MutableInteractionSource() }
+    val isNamePressed by nameInteractionSource.collectIsPressedAsState()
+
+    val weightValue = weight.toDoubleOrNull()
+    val unitPriceValue = unitPrice.toDoubleOrNull()
+    val canSave = name.isNotBlank() && weightValue != null && unitPriceValue != null
+    val filteredItemNames = remember(itemNames, name) {
+        if (name.isBlank()) itemNames else itemNames.filter { it.contains(name, ignoreCase = true) }
+    }
+
+    LaunchedEffect(isNamePressed) {
+        if (isNamePressed && itemNames.isNotEmpty()) {
+            showHistory = true
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (record == null) "登记卖出次果" else "修改卖出次果") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Box {
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = {
+                            name = it
+                            showHistory = itemNames.isNotEmpty()
+                        },
+                        label = { Text("项目名称") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { state ->
+                                if (state.isFocused && itemNames.isNotEmpty()) {
+                                    showHistory = true
+                                }
+                            },
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        leadingIcon = { Icon(Icons.Default.Inventory, null) },
+                        interactionSource = nameInteractionSource,
+                    )
+                    if (showHistory && filteredItemNames.isNotEmpty()) {
+                        DropdownMenu(
+                            expanded = showHistory,
+                            onDismissRequest = { showHistory = false },
+                            modifier = Modifier
+                                .fillMaxWidth(0.8f)
+                                .heightIn(max = 240.dp),
+                            properties = PopupProperties(focusable = false)
+                        ) {
+                            filteredItemNames.forEach { historyName ->
+                                DropdownMenuItem(
+                                    leadingIcon = { Icon(Icons.Default.History, null, modifier = Modifier.size(18.dp)) },
+                                    text = { Text(historyName) },
+                                    onClick = {
+                                        name = historyName
+                                        showHistory = false
+                                        scope.launch {
+                                            val lastWeight = onGetLastWeight(historyName)
+                                            if (lastWeight != null) {
+                                                weight = formatNumber(lastWeight)
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = weight,
+                        onValueChange = { weight = it },
+                        label = { Text("斤数") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    OutlinedTextField(
+                        value = unitPrice,
+                        onValueChange = { unitPrice = it },
+                        label = { Text("单价") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                }
+
+                if (canSave) {
+                    val totalAmount = weightValue!! * unitPriceValue!!
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.4f),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("卖出次果汇总", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                            Text(
+                                "斤数: ${formatNumber(weightValue)}斤  |  单价: ${formatCurrency(unitPriceValue)}  |  总额: ${formatCurrency(totalAmount)}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(name, weightValue!!, unitPriceValue!!) },
+                enabled = canSave,
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
+            ) {
+                Text("确认保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
+}
+
+@Composable
 private fun SummaryCard(
     title: String,
     totals: Totals,
@@ -2312,7 +2594,7 @@ private fun SummaryCard(
                 }
                 HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.1f))
             }
-            
+
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallSummaryRow("果款合计", formatCurrency(totals.totalStorageAmount))
                 
@@ -2348,6 +2630,73 @@ private fun SummaryCard(
                         Text(formatCurrency(totalCost), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecondarySaleSummaryCard(
+    title: String,
+    totals: Totals,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.78f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Payments, null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onTertiaryContainer)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            }
+
+            totals.secondarySaleSummaries.forEach { summary ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(summary.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Text(
+                            "斤数 ${formatNumber(summary.totalWeight)}斤  ·  单价 ${formatCurrency(summary.averageUnitPrice)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f)
+                        )
+                    }
+                    Text(
+                        formatCurrency(summary.totalAmount),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                    )
+                }
+                HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.14f))
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "合计 ${formatNumber(totals.totalSecondarySaleWeight)}斤",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
+                Text(
+                    formatCurrency(totals.totalSecondarySaleAmount),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                )
             }
         }
     }

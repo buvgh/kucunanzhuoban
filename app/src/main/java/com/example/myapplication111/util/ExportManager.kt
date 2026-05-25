@@ -76,9 +76,6 @@ object ExportManager {
         rows: List<AttendanceDashboardRow>,
     ) {
         val pdfDocument = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(842, 595, 1).create()
-        val page = pdfDocument.startPage(pageInfo)
-        val canvas = page.canvas
         val titlePaint = Paint().apply {
             textSize = 18f
             isFakeBoldText = true
@@ -97,51 +94,76 @@ object ExportManager {
 
         val margin = 24f
         val days = (1..YearMonth.parse(month).lengthOfMonth()).toList()
+        val pageWidth = 842
+        val pageHeight = 595
         val nameWidth = 70f
         val totalWidth = 52f
         val salaryWidth = 58f
-        val dayWidth = ((pageInfo.pageWidth - margin * 2 - nameWidth - totalWidth - salaryWidth) / days.size).coerceAtLeast(16f)
-        var y = 34f
+        val dayWidth = ((pageWidth - margin * 2 - nameWidth - totalWidth - salaryWidth) / days.size).coerceAtLeast(16f)
+        val rowHeight = 18f
+        val titleY = 34f
+        val headerY = 52f
+        val firstRowY = headerY + rowHeight
+        val footerReserved = 48f
+        val rowsPerPage = ((pageHeight - firstRowY - footerReserved) / rowHeight).toInt().coerceAtLeast(1)
+        val rowPages = if (rows.isEmpty()) listOf(emptyList()) else rows.chunked(rowsPerPage)
 
-        canvas.drawText("考勤表  $projectName  $month", margin, y, titlePaint)
-        y += 18f
-        canvas.drawRect(margin, y, pageInfo.pageWidth - margin, y + 18f, headerBgPaint)
-        canvas.drawText("员工", margin + 3f, y + 12f, boldPaint)
-        var x = margin + nameWidth
-        days.forEach { day ->
-            canvas.drawText(day.toString(), x + 2f, y + 12f, boldPaint)
-            x += dayWidth
-        }
-        canvas.drawText("合计", x + 3f, y + 12f, boldPaint)
-        canvas.drawText("工资", x + totalWidth + 3f, y + 12f, boldPaint)
-        y += 18f
+        rowPages.forEachIndexed { pageIndex, pageRows ->
+            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
+            val page = pdfDocument.startPage(pageInfo)
+            val canvas = page.canvas
+            var y = titleY
 
-        rows.take(22).forEach { row ->
-            x = margin
-            canvas.drawText(row.summary.workerName.take(6), x + 3f, y + 12f, textPaint)
-            x += nameWidth
+            canvas.drawText("考勤表  $projectName  $month", margin, y, titlePaint)
+            val pageText = "第 ${pageIndex + 1}/${rowPages.size} 页"
+            canvas.drawText(pageText, pageWidth - margin - textPaint.measureText(pageText), y, textPaint)
+
+            y = headerY
+            canvas.drawRect(margin, y, pageWidth - margin, y + rowHeight, headerBgPaint)
+            canvas.drawText("员工", margin + 3f, y + 12f, boldPaint)
+            var x = margin + nameWidth
             days.forEach { day ->
-                val cell = row.cellsByDay[day]
-                val value = when {
-                    cell == null -> ""
-                    row.summary.salaryMode == SalaryMode.HOURLY && cell.totalWorkHours > 0.0 -> fmtInt(cell.totalWorkHours)
-                    row.summary.salaryMode == SalaryMode.DAILY && cell.isPresent -> "√"
-                    else -> ""
-                }
-                canvas.drawText(value, x + 2f, y + 12f, textPaint)
+                canvas.drawText(day.toString(), x + 2f, y + 12f, boldPaint)
                 x += dayWidth
             }
-            val total = if (row.summary.salaryMode == SalaryMode.HOURLY) "${fmtInt(row.summary.totalWorkHours)}h" else "${row.summary.totalPresentDays}天"
-            canvas.drawText(total, x + 3f, y + 12f, textPaint)
-            canvas.drawText(fmtInt(row.summary.totalSalary), x + totalWidth + 3f, y + 12f, textPaint)
-            canvas.drawLine(margin, y + 18f, pageInfo.pageWidth - margin, y + 18f, linePaint)
-            y += 18f
+            canvas.drawText("合计", x + 3f, y + 12f, boldPaint)
+            canvas.drawText("工资", x + totalWidth + 3f, y + 12f, boldPaint)
+            y += rowHeight
+
+            pageRows.forEach { row ->
+                x = margin
+                canvas.drawText(row.summary.workerName.take(6), x + 3f, y + 12f, textPaint)
+                x += nameWidth
+                days.forEach { day ->
+                    val cell = row.cellsByDay[day]
+                    val value = when {
+                        cell == null -> ""
+                        row.summary.salaryMode == SalaryMode.HOURLY && cell.totalWorkHours > 0.0 -> fmtInt(cell.totalWorkHours)
+                        row.summary.salaryMode == SalaryMode.DAILY && cell.isPresent -> "√"
+                        else -> ""
+                    }
+                    canvas.drawText(value, x + 2f, y + 12f, textPaint)
+                    x += dayWidth
+                }
+                val total = if (row.summary.salaryMode == SalaryMode.HOURLY) "${fmtInt(row.summary.totalWorkHours)}h" else "${row.summary.totalPresentDays}天"
+                canvas.drawText(total, x + 3f, y + 12f, textPaint)
+                canvas.drawText(fmtInt(row.summary.totalSalary), x + totalWidth + 3f, y + 12f, textPaint)
+                canvas.drawLine(margin, y + rowHeight, pageWidth - margin, y + rowHeight, linePaint)
+                y += rowHeight
+            }
+
+            if (pageIndex == rowPages.lastIndex) {
+                y = (y + 16f).coerceAtMost(pageHeight - 28f)
+                canvas.drawText(
+                    "汇总: 工时 ${fmtInt(rows.sumOf { it.summary.totalWorkHours })}h   天数 ${rows.sumOf { it.summary.totalPresentDays }}天   工资 ${fmtInt(rows.sumOf { it.summary.totalSalary })}",
+                    margin,
+                    y,
+                    boldPaint
+                )
+            }
+
+            pdfDocument.finishPage(page)
         }
-
-        y += 18f
-        canvas.drawText("汇总: 工时 ${fmtInt(rows.sumOf { it.summary.totalWorkHours })}h   天数 ${rows.sumOf { it.summary.totalPresentDays }}天   工资 ${fmtInt(rows.sumOf { it.summary.totalSalary })}", margin, y, boldPaint)
-
-        pdfDocument.finishPage(page)
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
         val file = File(context.cacheDir, "Attendance_${projectName}_${month}_$timestamp.pdf")
@@ -172,6 +194,7 @@ object ExportManager {
                 writer.write("入库总件数,${fmtInt(detail.totals.totalCount)}件\n")
                 writer.write("入库总重量,${fmtInt(detail.totals.totalWeight)}斤\n")
                 writer.write("入库总果款,¥${fmtInt(detail.totals.totalStorageAmount)}\n")
+                writer.write("卖出次果,${fmtInt(detail.totals.totalSecondarySaleWeight)}斤 / ¥${fmtInt(detail.totals.totalSecondarySaleAmount)}\n")
                 writer.write("出库总件数,${fmtInt(detail.totals.totalOutboundCount)}件\n")
                 writer.write("出库总重量,${fmtInt(detail.totals.totalOutboundWeight)}斤\n")
                 writer.write("净库存件数,${fmtInt(detail.totals.netTotalCount)}件\n")
@@ -184,6 +207,13 @@ object ExportManager {
                 writer.write("品名,件数(件),单重(斤),单价(¥/斤),总重(斤),金额(¥)\n")
                 detail.storageRecords.forEach { r ->
                     writer.write("${r.name},${fmtInt(r.count)},${fmtInt(r.weightPerUnit)},¥${fmtInt(r.pricePerWeight)},${fmtInt(r.totalWeight)},¥${fmtInt(r.totalPrice)}\n")
+                }
+                writer.write("\n")
+
+                writer.write("卖出次果\n")
+                writer.write("项目名称,斤数,单价(¥),总额(¥)\n")
+                detail.secondarySaleRecords.forEach { r ->
+                    writer.write("${r.name},${fmtInt(r.weight)},¥${fmtInt(r.unitPrice)},¥${fmtInt(r.totalAmount)}\n")
                 }
                 writer.write("\n")
 
