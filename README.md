@@ -1,6 +1,6 @@
 # 库存岸桌版 / Android 进销存与考勤管理
 
-> **[📥 点击下载最新 Android 安装包 (APK)](https://github.com/buvgh/kucunanzhuoban/raw/main/app-release.apk)**
+> **[📥 点击下载最新 Android 安装包 (v1.2.16)](https://github.com/buvgh/kucunanzhuoban/raw/v1.2.16/app-release.apk)**
 
 这是一个基于 **Kotlin + Jetpack Compose + Room** 的原生 Android 项目，当前定位是离线使用的项目制进销存与考勤记录工具。
 
