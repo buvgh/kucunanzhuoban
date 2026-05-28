@@ -1,6 +1,7 @@
 package com.example.myapplication111.ui
 
 import android.app.Application
+import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
@@ -17,6 +18,11 @@ import com.example.myapplication111.data.DayPhotoEntity
 import com.example.myapplication111.data.ProjectOverviewUi
 import com.example.myapplication111.data.ProjectGroupSummaryUi
 import com.example.myapplication111.data.FeeRecordEntity
+import com.example.myapplication111.data.FundDayDetailUi
+import com.example.myapplication111.data.FundProjectExportUi
+import com.example.myapplication111.data.FundProjectOverviewUi
+import com.example.myapplication111.data.FundProjectSummaryUi
+import com.example.myapplication111.data.FundRecordEntity
 import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.PaymentRecordEntity
 import com.example.myapplication111.data.ProjectSummaryUi
@@ -45,6 +51,9 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
     private val _restoreSuccessTrigger = MutableSharedFlow<Boolean>()
     val restoreSuccessTrigger: SharedFlow<Boolean> = _restoreSuccessTrigger.asSharedFlow()
 
+    private val _activePdf = MutableStateFlow<PdfViewerState?>(null)
+    val activePdf: StateFlow<PdfViewerState?> = _activePdf.asStateFlow()
+
     fun restoreBackup(file: File) {
         viewModelScope.launch {
             if (BackupManager.restoreBackup(getApplication(), file)) {
@@ -57,7 +66,18 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         _isDarkMode.value = !_isDarkMode.value
     }
 
+    fun openPdf(uri: Uri, title: String = "PDF查看") {
+        _activePdf.value = PdfViewerState(uri = uri, title = title)
+    }
+
+    fun closePdf() {
+        _activePdf.value = null
+    }
+
     val projectSummaries: StateFlow<List<ProjectSummaryUi>> = repository.observeProjectSummaries()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val fundProjectSummaries: StateFlow<List<FundProjectSummaryUi>> = repository.observeFundProjectSummaries()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val projectGroupSummaries: StateFlow<List<ProjectGroupSummaryUi>> = repository.observeProjectGroupSummaries()
@@ -65,6 +85,14 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
 
     fun observeProjectOverview(projectId: Long): Flow<ProjectOverviewUi?> {
         return repository.observeProjectOverview(projectId)
+    }
+
+    fun observeFundProjectOverview(projectId: Long): Flow<FundProjectOverviewUi?> {
+        return repository.observeFundProjectOverview(projectId)
+    }
+
+    fun observeFundProjectExport(projectId: Long): Flow<FundProjectExportUi?> {
+        return repository.observeFundProjectExport(projectId)
     }
 
     fun observeWorkers(projectId: Long): Flow<List<WorkerEntity>> {
@@ -75,6 +103,10 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         return repository.observeDayDetail(projectId, dateId)
     }
 
+    fun observeFundDayDetail(projectId: Long, dateId: Long): Flow<FundDayDetailUi?> {
+        return repository.observeFundDayDetail(projectId, dateId)
+    }
+
     fun createProject(name: String) {
         viewModelScope.launch {
             repository.createProject(name)
@@ -82,9 +114,23 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun createFundProject(name: String) {
+        viewModelScope.launch {
+            repository.createFundProject(name)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
     fun deleteProject(projectId: Long) {
         viewModelScope.launch {
             repository.deleteProject(projectId)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteFundProject(projectId: Long) {
+        viewModelScope.launch {
+            repository.deleteFundProject(projectId)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -116,9 +162,22 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         return dateId
     }
 
+    suspend fun createOrGetFundDate(projectId: Long, date: String): Long {
+        val dateId = repository.createFundDate(projectId, date)
+        BackupManager.backupDatabase(getApplication())
+        return dateId
+    }
+
     fun deleteDate(dateId: Long) {
         viewModelScope.launch {
             repository.deleteDate(dateId)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteFundDate(dateId: Long) {
+        viewModelScope.launch {
+            repository.deleteFundDate(dateId)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -286,6 +345,27 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun addFundRecord(dateId: Long, type: Int, name: String, amount: Double, remark: String) {
+        viewModelScope.launch {
+            repository.addFundRecord(dateId, type, name, amount, remark)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun updateFundRecord(record: FundRecordEntity, name: String, amount: Double, remark: String) {
+        viewModelScope.launch {
+            repository.updateFundRecord(record, name, amount, remark)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
+    fun deleteFundRecord(record: FundRecordEntity) {
+        viewModelScope.launch {
+            repository.deleteFundRecord(record)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
     fun observeMonthlyAttendanceSummary(projectId: Long, month: String): Flow<List<AttendanceSummary>> {
         return repository.observeMonthlyAttendanceSummary(projectId, month)
     }
@@ -317,11 +397,15 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
+        attendancePortion: Double,
         hourlyRate: Double?,
         dailyRate: Double?,
+        overtimeHours: Double,
+        overtimeRate: Double,
+        cellColor: Int = 0,
     ) {
         viewModelScope.launch {
-            repository.saveAttendanceRecord(projectId, workerId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            repository.saveAttendanceRecord(projectId, workerId, date, salaryMode, startTime, endTime, isPresent, attendancePortion, hourlyRate, dailyRate, overtimeHours, overtimeRate, cellColor)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -333,11 +417,15 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
+        attendancePortion: Double,
         hourlyRate: Double?,
         dailyRate: Double?,
+        overtimeHours: Double,
+        overtimeRate: Double,
+        cellColor: Int,
     ) {
         viewModelScope.launch {
-            repository.updateAttendanceRecord(attendanceId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
+            repository.updateAttendanceRecord(attendanceId, date, salaryMode, startTime, endTime, isPresent, attendancePortion, hourlyRate, dailyRate, overtimeHours, overtimeRate, cellColor)
             BackupManager.backupDatabase(getApplication())
         }
     }
@@ -370,3 +458,8 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 }
+
+data class PdfViewerState(
+    val uri: Uri,
+    val title: String,
+)

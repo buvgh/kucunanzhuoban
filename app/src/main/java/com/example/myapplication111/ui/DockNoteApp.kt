@@ -1,13 +1,17 @@
 package com.example.myapplication111.ui
 
 import android.app.Activity
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -123,6 +127,8 @@ import com.example.myapplication111.data.AttendanceEntity
 import com.example.myapplication111.data.AttendanceMonthBoard
 import com.example.myapplication111.data.AttendanceProjectSummary
 import com.example.myapplication111.data.AttendanceSummary
+import com.example.myapplication111.data.FundRecordEntity
+import com.example.myapplication111.data.FundRecordType
 import com.example.myapplication111.data.OutboundRecordEntity
 import com.example.myapplication111.data.ProjectOverviewUi
 import com.example.myapplication111.data.ProjectGroupSummaryUi
@@ -142,8 +148,10 @@ import kotlinx.coroutines.launch
 @Composable
 fun DockNoteApp(viewModel: DockNoteViewModel) {
     val projects by viewModel.projectSummaries.collectAsState()
+    val fundProjects by viewModel.fundProjectSummaries.collectAsState()
     val projectGroups by viewModel.projectGroupSummaries.collectAsState()
     val isDarkMode by viewModel.isDarkMode.collectAsState()
+    val activePdf by viewModel.activePdf.collectAsState()
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val coroutineScope = rememberCoroutineScope()
@@ -151,6 +159,8 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
 
     val currentProjectId = navBackStackEntry?.arguments?.getLong(NavArgs.ProjectId)
     val currentDateId = navBackStackEntry?.arguments?.getLong(NavArgs.DateId)
+    val currentFundProjectId = navBackStackEntry?.arguments?.getLong(NavArgs.FundProjectId)
+    val currentFundDateId = navBackStackEntry?.arguments?.getLong(NavArgs.FundDateId)
     val currentOverview by remember(currentProjectId) {
         if (currentProjectId == null) {
             flowOf(null)
@@ -165,6 +175,27 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             viewModel.observeDayDetail(currentProjectId, currentDateId)
         }
     }.collectAsState(initial = null)
+    val currentFundOverview by remember(currentFundProjectId) {
+        if (currentFundProjectId == null) {
+            flowOf(null)
+        } else {
+            viewModel.observeFundProjectOverview(currentFundProjectId)
+        }
+    }.collectAsState(initial = null)
+    val currentFundExport by remember(currentFundProjectId) {
+        if (currentFundProjectId == null) {
+            flowOf(null)
+        } else {
+            viewModel.observeFundProjectExport(currentFundProjectId)
+        }
+    }.collectAsState(initial = null)
+    val currentFundDayDetail by remember(currentFundProjectId, currentFundDateId) {
+        if (currentFundProjectId == null || currentFundDateId == null) {
+            flowOf(null)
+        } else {
+            viewModel.observeFundDayDetail(currentFundProjectId, currentFundDateId)
+        }
+    }.collectAsState(initial = null)
 
     var showProjectDialog by rememberSaveable { mutableStateOf(false) }
     var showStorageDialog by rememberSaveable { mutableStateOf(false) }
@@ -174,14 +205,20 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
     var showPaymentDialog by rememberSaveable { mutableStateOf(false) }
     var showDatePickerDialog by rememberSaveable { mutableStateOf(false) }
     var showProjectGroupDialog by rememberSaveable { mutableStateOf(false) }
+    var showFundProjectDialog by rememberSaveable { mutableStateOf(false) }
+    var showFundDatePickerDialog by rememberSaveable { mutableStateOf(false) }
+    var showFundRecordDialog by rememberSaveable { mutableStateOf(false) }
     var editingProjectGroup by remember { mutableStateOf<ProjectGroupSummaryUi?>(null) }
     var editingStorage by remember { mutableStateOf<StorageRecordEntity?>(null) }
     var editingSecondarySale by remember { mutableStateOf<SecondarySaleRecordEntity?>(null) }
     var editingOutbound by remember { mutableStateOf<OutboundRecordEntity?>(null) }
     var editingFee by remember { mutableStateOf<FeeRecordEntity?>(null) }
     var editingPayment by remember { mutableStateOf<PaymentRecordEntity?>(null) }
+    var editingFundRecord by remember { mutableStateOf<FundRecordEntity?>(null) }
 
     var selectedDayTab by rememberSaveable { mutableStateOf(0) }
+    var selectedFundTab by rememberSaveable { mutableStateOf(0) }
+    var newFundRecordType by rememberSaveable { mutableStateOf(FundRecordType.INCOME) }
 
     val itemNames by viewModel.uniqueItemNames.collectAsState()
 
@@ -196,22 +233,31 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         }
     }.collectAsState(initial = emptyList())
 
-    val title = when (destinationRoute) {
+    val title = when {
+        activePdf != null -> activePdf?.title ?: "PDF查看"
+        else -> when (destinationRoute) {
         Routes.ProjectList -> "库存管理"
         Routes.ProjectOverview -> currentOverview?.name ?: "项目总览"
         Routes.DayDetail -> currentDayDetail?.date ?: "每日详情"
         Routes.Camera -> "拍照"
         Routes.Attendance -> "考勤看板"
         Routes.Summary -> "汇总"
+        Routes.Funds -> "资金"
+        Routes.FundProjectOverview -> currentFundOverview?.name ?: "资金项目"
+        Routes.FundDayDetail -> currentFundDayDetail?.date ?: "资金明细"
         else -> "库存管理"
+        }
     }
 
     val context = LocalContext.current
-    val topLevelRoutes = setOf(Routes.ProjectList, Routes.Summary, Routes.Attendance)
-    val showNavigateBack = destinationRoute !in topLevelRoutes && navController.previousBackStackEntry != null
+    val topLevelRoutes = setOf(Routes.ProjectList, Routes.Summary, Routes.Attendance, Routes.Funds)
+    val showNavigateBack = activePdf != null || (destinationRoute !in topLevelRoutes && navController.previousBackStackEntry != null)
 
-    BackHandler(enabled = destinationRoute == Routes.Summary || destinationRoute == Routes.Attendance) {
+    BackHandler(enabled = destinationRoute == Routes.Summary || destinationRoute == Routes.Attendance || destinationRoute == Routes.Funds) {
         (context as? Activity)?.finish()
+    }
+    BackHandler(enabled = activePdf != null) {
+        viewModel.closePdf()
     }
 
     fun navigateTopLevel(route: String) {
@@ -238,20 +284,41 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 },
                 navigationIcon = {
                     if (showNavigateBack) {
-                        IconButton(onClick = { navController.popBackStack() }) {
+                        IconButton(onClick = {
+                            if (activePdf != null) {
+                                viewModel.closePdf()
+                            } else {
+                                navController.popBackStack()
+                            }
+                        }) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                         }
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showBackupDialog = true }) {
-                        Icon(Icons.Default.Settings, contentDescription = "备份管理")
-                    }
-                    IconButton(onClick = { viewModel.toggleDarkMode() }) {
-                        Icon(
-                            imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
-                            contentDescription = "切换模式"
-                        )
+                    if (activePdf != null) {
+                        IconButton(
+                            onClick = {
+                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                    type = "application/pdf"
+                                    putExtra(Intent.EXTRA_STREAM, activePdf!!.uri)
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                }
+                                context.startActivity(Intent.createChooser(shareIntent, "分享PDF"))
+                            }
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = "分享PDF")
+                        }
+                    } else {
+                        IconButton(onClick = { showBackupDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "备份管理")
+                        }
+                        IconButton(onClick = { viewModel.toggleDarkMode() }) {
+                            Icon(
+                                imageVector = if (isDarkMode) Icons.Default.LightMode else Icons.Default.DarkMode,
+                                contentDescription = "切换模式"
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -261,10 +328,10 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             )
         },
         bottomBar = {
-            if (destinationRoute != Routes.Camera) {
+            if (destinationRoute != Routes.Camera && activePdf == null) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     NavigationBarItem(
-                        selected = destinationRoute != Routes.Attendance && destinationRoute != Routes.Summary,
+                        selected = destinationRoute != Routes.Attendance && destinationRoute != Routes.Summary && destinationRoute != Routes.Funds,
                         onClick = { navigateTopLevel(Routes.ProjectList) },
                         icon = { Icon(Icons.Default.Inventory, contentDescription = null) },
                         label = { Text("库存") },
@@ -281,12 +348,19 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         icon = { Icon(Icons.Default.History, contentDescription = null) },
                         label = { Text("考勤") },
                     )
+                    NavigationBarItem(
+                        selected = destinationRoute == Routes.Funds,
+                        onClick = { navigateTopLevel(Routes.Funds) },
+                        icon = { Icon(Icons.Default.Payments, contentDescription = null) },
+                        label = { Text("资金") },
+                    )
                 }
             }
         },
         floatingActionButton = {
-            when (destinationRoute) {
-                Routes.DayDetail -> {
+            when {
+                activePdf != null -> Unit
+                destinationRoute == Routes.DayDetail -> {
                     val fabColor = when (selectedDayTab) {
                         3 -> MaterialTheme.colorScheme.secondary
                         else -> MaterialTheme.colorScheme.primary
@@ -340,7 +414,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         }
                     }
                 }
-                Routes.ProjectOverview -> {
+                destinationRoute == Routes.ProjectOverview -> {
                     FloatingActionButton(
                         onClick = { showDatePickerDialog = true },
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -349,7 +423,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         Icon(Icons.Default.Add, "新建日期")
                     }
                 }
-                Routes.ProjectList -> {
+                destinationRoute == Routes.ProjectList -> {
                     FloatingActionButton(
                         onClick = { showProjectDialog = true },
                         containerColor = MaterialTheme.colorScheme.primary,
@@ -358,8 +432,44 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         Icon(Icons.Default.Add, "新建项目")
                     }
                 }
-                Routes.Attendance -> Unit
-                Routes.Summary -> Unit
+                destinationRoute == Routes.FundProjectOverview -> {
+                    FloatingActionButton(
+                        onClick = { showFundDatePickerDialog = true },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        Icon(Icons.Default.Add, "新建日期")
+                    }
+                }
+                destinationRoute == Routes.Funds -> {
+                    FloatingActionButton(
+                        onClick = { showFundProjectDialog = true },
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    ) {
+                        Icon(Icons.Default.Add, "新建资金项目")
+                    }
+                }
+                destinationRoute == Routes.FundDayDetail -> {
+                    if (selectedFundTab != 0) {
+                        FloatingActionButton(
+                            onClick = {
+                                editingFundRecord = null
+                                newFundRecordType = when (selectedFundTab) {
+                                    1 -> FundRecordType.INITIAL
+                                    2 -> FundRecordType.INCOME
+                                    else -> FundRecordType.EXPENSE
+                                }
+                                showFundRecordDialog = true
+                            },
+                            containerColor = MaterialTheme.colorScheme.secondary,
+                            contentColor = MaterialTheme.colorScheme.onSecondary
+                        ) {
+                            Icon(Icons.Default.Add, "新增资金记录")
+                        }
+                    }
+                }
+                else -> Unit
             }
         },
     ) { innerPadding ->
@@ -369,7 +479,12 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 .background(MaterialTheme.colorScheme.background)
                 .padding(innerPadding),
         ) {
-            NavHost(
+            if (activePdf != null) {
+                PdfViewerScreen(
+                    pdfUri = activePdf!!.uri,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else NavHost(
                 navController = navController,
                 startDestination = Routes.ProjectList,
             ) {
@@ -473,6 +588,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                                         record = null,
                                         hourlyRate = worker.hourlyRate,
                                         dailyRate = worker.dailyRate,
+                                        cellColor = 0,
                                     )
                                 }
                             },
@@ -485,6 +601,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                                     record = record,
                                     hourlyRate = if (record.hourlyRateSnapshot > 0.0) record.hourlyRateSnapshot else worker?.hourlyRate ?: 0.0,
                                     dailyRate = if (record.dailyRateSnapshot > 0.0) record.dailyRateSnapshot else worker?.dailyRate ?: 0.0,
+                                    cellColor = record.cellColor,
                                 )
                             },
                             onDeleteAttendance = viewModel::deleteAttendanceRecord,
@@ -554,6 +671,67 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                         )
                     }
                 }
+                composable(Routes.Funds) {
+                    FundProjectListScreen(
+                        projects = fundProjects,
+                        onOpenProject = { fundProjectId -> navController.navigate(Routes.fundProject(fundProjectId)) },
+                        onDeleteProject = viewModel::deleteFundProject,
+                    )
+                }
+                composable(
+                    route = Routes.FundProjectOverview,
+                    arguments = listOf(navArgument(NavArgs.FundProjectId) { type = NavType.LongType }),
+                ) {
+                    val fundProjectId = currentFundProjectId
+                    val overview = currentFundOverview
+                    if (fundProjectId == null || overview == null) {
+                        EmptyState("资金项目不存在或已删除")
+                    } else {
+                        FundProjectOverviewScreen(
+                            overview = overview,
+                            onOpenDate = { dateId -> navController.navigate(Routes.fundDay(fundProjectId, dateId)) },
+                            onDeleteProject = {
+                                viewModel.deleteFundProject(fundProjectId)
+                                navController.popBackStack(Routes.Funds, false)
+                            },
+                            onDeleteDate = viewModel::deleteFundDate,
+                            onExportCsv = {
+                                currentFundExport?.let { export ->
+                                    ExportManager.exportFundProjectToCsv(context, export)
+                                }
+                            },
+                            onExportPdf = {
+                                currentFundExport?.let { export ->
+                                    ExportManager.exportFundProjectToPdf(context, export)
+                                }
+                            },
+                        )
+                    }
+                }
+                composable(
+                    route = Routes.FundDayDetail,
+                    arguments = listOf(
+                        navArgument(NavArgs.FundProjectId) { type = NavType.LongType },
+                        navArgument(NavArgs.FundDateId) { type = NavType.LongType },
+                    ),
+                ) {
+                    val detail = currentFundDayDetail
+                    if (detail == null) {
+                        EmptyState("资金日期不存在或已删除")
+                    } else {
+                        FundDayDetailScreen(
+                            detail = detail,
+                            selectedTab = selectedFundTab,
+                            onTabSelected = { selectedFundTab = it },
+                            onEditRecord = { record ->
+                                editingFundRecord = record
+                                newFundRecordType = record.type
+                                showFundRecordDialog = true
+                            },
+                            onDeleteRecord = viewModel::deleteFundRecord,
+                        )
+                    }
+                }
                 composable(Routes.Summary) {
                     ProjectGroupScreen(
                         groups = projectGroups,
@@ -578,6 +756,16 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             onConfirm = { name ->
                 viewModel.createProject(name)
                 showProjectDialog = false
+            },
+        )
+    }
+
+    if (showFundProjectDialog) {
+        FundProjectDialog(
+            onDismiss = { showFundProjectDialog = false },
+            onConfirm = { name ->
+                viewModel.createFundProject(name)
+                showFundProjectDialog = false
             },
         )
     }
@@ -619,6 +807,20 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 }
                 showProjectGroupDialog = false
                 editingProjectGroup = null
+            },
+        )
+    }
+
+    if (showFundDatePickerDialog) {
+        FundDatePickerDialog(
+            onDismiss = { showFundDatePickerDialog = false },
+            onConfirm = { date ->
+                val fundProjectId = currentFundProjectId ?: return@FundDatePickerDialog
+                coroutineScope.launch {
+                    val dateId = viewModel.createOrGetFundDate(fundProjectId, date)
+                    showFundDatePickerDialog = false
+                    navController.navigate(Routes.fundDay(fundProjectId, dateId))
+                }
             },
         )
     }
@@ -774,16 +976,37 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         )
     }
 
+    if (showFundRecordDialog) {
+        FundRecordDialog(
+            record = editingFundRecord,
+            type = if (editingFundRecord == null) newFundRecordType else editingFundRecord!!.type,
+            onDismiss = {
+                showFundRecordDialog = false
+                editingFundRecord = null
+            },
+            onConfirm = { name, amount, remark ->
+                val dateId = currentFundDayDetail?.dateId ?: return@FundRecordDialog
+                if (editingFundRecord == null) {
+                    viewModel.addFundRecord(dateId, newFundRecordType, name, amount, remark)
+                } else {
+                    viewModel.updateFundRecord(editingFundRecord!!, name, amount, remark)
+                }
+                showFundRecordDialog = false
+                editingFundRecord = null
+            },
+        )
+    }
+
     attendanceEditTarget?.let { target ->
         AttendanceRecordDialog(
             target = target,
             onDismiss = { attendanceEditTarget = null },
-            onConfirm = { record, workerId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate ->
+            onConfirm = { record, workerId, date, salaryMode, startTime, endTime, isPresent, attendancePortion, hourlyRate, dailyRate, overtimeHours, overtimeRate, cellColor ->
                 if (record == null) {
                     val projectId = currentDayDetail?.projectId ?: return@AttendanceRecordDialog
-                    viewModel.saveAttendanceRecord(projectId, workerId, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
+                    viewModel.saveAttendanceRecord(projectId, workerId, date, salaryMode, startTime, endTime, isPresent, attendancePortion, hourlyRate, dailyRate, overtimeHours, overtimeRate, cellColor)
                 } else {
-                    viewModel.updateAttendanceRecord(record.id, date, salaryMode, startTime, endTime, isPresent, hourlyRate, dailyRate)
+                    viewModel.updateAttendanceRecord(record.id, date, salaryMode, startTime, endTime, isPresent, attendancePortion, hourlyRate, dailyRate, overtimeHours, overtimeRate, cellColor)
                 }
                 attendanceEditTarget = null
             },
@@ -794,6 +1017,8 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
 private object NavArgs {
     const val ProjectId = "projectId"
     const val DateId = "dateId"
+    const val FundProjectId = "fundProjectId"
+    const val FundDateId = "fundDateId"
 }
 
 private object Routes {
@@ -803,10 +1028,15 @@ private object Routes {
     const val Camera = "project/{projectId}/day/{dateId}/camera"
     const val Attendance = "attendance"
     const val Summary = "summary"
+    const val Funds = "funds"
+    const val FundProjectOverview = "funds/{fundProjectId}"
+    const val FundDayDetail = "funds/{fundProjectId}/day/{fundDateId}"
 
     fun project(projectId: Long): String = "project/$projectId"
     fun day(projectId: Long, dateId: Long): String = "project/$projectId/day/$dateId"
     fun camera(projectId: Long, dateId: Long): String = "project/$projectId/day/$dateId/camera"
+    fun fundProject(projectId: Long): String = "funds/$projectId"
+    fun fundDay(projectId: Long, dateId: Long): String = "funds/$projectId/day/$dateId"
 }
 
 private data class AttendanceEditTarget(
@@ -816,6 +1046,7 @@ private data class AttendanceEditTarget(
     val record: AttendanceEntity?,
     val hourlyRate: Double,
     val dailyRate: Double,
+    val cellColor: Int,
 )
 
 @Composable
@@ -1393,6 +1624,30 @@ private fun DateCard(
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
+                if (dateSummary.totals.secondarySaleSummaries.isNotEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(999.dp),
+                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "卖出次果",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                            )
+                            Text(
+                                "${formatNumber(dateSummary.totals.totalSecondarySaleWeight)}斤 · ¥${formatNumber(dateSummary.totals.totalSecondarySaleAmount)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.85f),
+                            )
+                        }
+                    }
+                }
                 TotalsCompactText(dateSummary.totals)
             }
             IconButton(onClick = { showDeleteConfirm = true }) {
@@ -1714,7 +1969,7 @@ private fun AttendanceTabContent(
                         workerName = worker.name,
                         salaryMode = SalaryMode.HOURLY,
                         totalWorkHours = 0.0,
-                        totalPresentDays = 0,
+                        totalPresentDays = 0.0,
                         totalSalary = 0.0,
                     ),
                     cellsByDay = emptyMap(),
@@ -1940,7 +2195,7 @@ private fun AttendanceProjectSummaryCard(
             Text(summary.projectName, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CompactMetric("工时", "${formatNumber(summary.totalWorkHours)}h", Modifier.weight(1f), highlight = true)
-                CompactMetric("天数", "${summary.totalPresentDays}天", Modifier.weight(1f), highlight = true)
+                CompactMetric("天数", "${formatNumber(summary.totalPresentDays)}天", Modifier.weight(1f), highlight = true)
                 CompactMetric("工资", formatCurrency(summary.totalSalary), Modifier.weight(1f), highlight = true)
             }
         }
@@ -2665,7 +2920,7 @@ private fun SecondarySaleSummaryCard(
                     Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(summary.name, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onTertiaryContainer)
                         Text(
-                            "斤数 ${formatNumber(summary.totalWeight)}斤  ·  单价 ${formatCurrency(summary.averageUnitPrice)}",
+                            "斤数 ${formatNumber(summary.totalWeight)}斤",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.75f)
                         )
@@ -2984,7 +3239,7 @@ private fun WorkerDialog(
 private fun AttendanceRecordDialog(
     target: AttendanceEditTarget,
     onDismiss: () -> Unit,
-    onConfirm: (AttendanceEntity?, Long, String, Int, String?, String?, Boolean, Double?, Double?) -> Unit,
+    onConfirm: (AttendanceEntity?, Long, String, Int, String?, String?, Boolean, Double, Double?, Double?, Double, Double, Int) -> Unit,
 ) {
     val initialStartParts = remember(target.record?.id) { parseTimeParts(target.record?.startTime, 8, 0) }
     val initialEndParts = remember(target.record?.id) { parseTimeParts(target.record?.endTime, 18, 0) }
@@ -3002,15 +3257,45 @@ private fun AttendanceRecordDialog(
     var endHour by remember(target.record?.id) { mutableStateOf(initialEndParts.first) }
     var endMinute by remember(target.record?.id) { mutableStateOf(initialEndParts.second) }
     var isPresent by remember(target.record?.id) { mutableStateOf(target.record?.isPresent ?: true) }
+    var attendancePortion by remember(target.record?.id) {
+        mutableStateOf(
+            target.record?.attendancePortion?.takeIf { it > 0.0 }
+                ?: if (target.record?.salaryModeSnapshot == SalaryMode.DAILY) 1.0 else 0.0,
+        )
+    }
     var hourlyRateText by remember(target.record?.id, target.hourlyRate) { mutableStateOf(target.hourlyRate.toText()) }
-    var dailyRateText by remember(target.record?.id, target.dailyRate) { mutableStateOf(target.dailyRate.toText()) }
+    val initialFullDayRate = remember(target.record?.id, target.dailyRate) {
+        when {
+            target.record?.salaryModeSnapshot == SalaryMode.DAILY && target.record.attendancePortion in 0.49..0.51 ->
+                (target.dailyRate * 2).toText()
+            else -> target.dailyRate.toText()
+        }
+    }
+    val initialHalfDayRate = remember(target.record?.id, target.dailyRate) {
+        when {
+            target.record?.salaryModeSnapshot == SalaryMode.DAILY && target.record.attendancePortion in 0.49..0.51 ->
+                target.dailyRate.toText()
+            target.dailyRate > 0.0 -> (target.dailyRate / 2.0).toText()
+            else -> ""
+        }
+    }
+    var fullDayRateText by remember(target.record?.id, target.dailyRate) { mutableStateOf(initialFullDayRate) }
+    var halfDayRateText by remember(target.record?.id, target.dailyRate) { mutableStateOf(initialHalfDayRate) }
+    var overtimeHoursText by remember(target.record?.id) { mutableStateOf(target.record?.overtimeHours?.takeIf { it > 0.0 }?.toText().orEmpty()) }
+    var overtimeRateText by remember(target.record?.id) { mutableStateOf(target.record?.overtimeRate?.takeIf { it > 0.0 }?.toText().orEmpty()) }
+    var cellColor by remember(target.record?.id, target.cellColor) { mutableStateOf(target.cellColor) }
 
     val isHourly = mode == SalaryMode.HOURLY
     val startTime = "%02d:%02d".format(startHour, startMinute)
     val endTime = "%02d:%02d".format(endHour, endMinute)
     val hourlyRateValue = hourlyRateText.toDoubleOrNull()
-    val dailyRateValue = dailyRateText.toDoubleOrNull()
-    val canSave = if (isHourly) hourlyRateValue != null else dailyRateValue != null
+    val isHalfDay = !isHourly && isPresent && attendancePortion in 0.49..0.51
+    val dailyRateValue = if (isHalfDay) halfDayRateText.toDoubleOrNull() else fullDayRateText.toDoubleOrNull()
+    val overtimeHoursValue = overtimeHoursText.toDoubleOrNull() ?: 0.0
+    val overtimeRateValue = overtimeRateText.toDoubleOrNull() ?: 0.0
+    val overtimeInputValid = (overtimeHoursText.isBlank() || overtimeHoursText.toDoubleOrNull() != null) &&
+        (overtimeRateText.isBlank() || overtimeRateText.toDoubleOrNull() != null)
+    val canSave = (if (isHourly) hourlyRateValue != null else dailyRateValue != null) && overtimeInputValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -3069,31 +3354,108 @@ private fun AttendanceRecordDialog(
                         )
                     }
                 } else {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Checkbox(
-                            checked = isPresent,
-                            onCheckedChange = { isPresent = it },
-                        )
-                        Text("已出勤")
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = isPresent,
+                                onCheckedChange = { isPresent = it },
+                            )
+                            Text("已出勤")
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    isPresent = true
+                                    attendancePortion = 1.0
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = if (attendancePortion >= 0.99 && isPresent) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors(),
+                            ) {
+                                Text("全天")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    isPresent = true
+                                    attendancePortion = 0.5
+                                },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = if (attendancePortion in 0.49..0.51 && isPresent) ButtonDefaults.buttonColors() else ButtonDefaults.outlinedButtonColors(),
+                            ) {
+                                Text("半天")
+                            }
+                        }
                         OutlinedTextField(
-                            value = dailyRateText,
-                            onValueChange = { dailyRateText = it },
-                            label = { Text("日薪") },
-                            modifier = Modifier.weight(1f),
+                            value = if (isHalfDay) halfDayRateText else fullDayRateText,
+                            onValueChange = {
+                                if (isHalfDay) {
+                                    halfDayRateText = it
+                                } else {
+                                    fullDayRateText = it
+                                }
+                            },
+                            label = { Text(if (isHalfDay) "半天工资" else "全天工资") },
+                            modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
                             shape = RoundedCornerShape(12.dp),
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         )
                     }
                 }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    OutlinedTextField(
+                        value = overtimeHoursText,
+                        onValueChange = { overtimeHoursText = it },
+                        label = { Text("加班小时") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                    OutlinedTextField(
+                        value = overtimeRateText,
+                        onValueChange = { overtimeRateText = it },
+                        label = { Text("加班单价") },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true,
+                        shape = RoundedCornerShape(12.dp),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    )
+                }
                 Text(
                     "工资保存后会作为下次默认值",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                if (target.record != null) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "格子颜色",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Row(
+                            modifier = Modifier.horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            attendanceClassicColors.forEach { option ->
+                                AttendanceColorChip(
+                                    label = option.label,
+                                    colorInt = option.colorInt,
+                                    selected = cellColor == option.colorInt,
+                                    onClick = { cellColor = option.colorInt },
+                                )
+                            }
+                        }
+                    }
+                }
             }
         },
         confirmButton = {
@@ -3107,8 +3469,12 @@ private fun AttendanceRecordDialog(
                         if (isHourly) startTime else null,
                         if (isHourly) endTime else null,
                         if (!isHourly) isPresent else true,
+                        if (!isHourly && isPresent) attendancePortion else 0.0,
                         hourlyRateValue,
                         dailyRateValue,
+                        overtimeHoursValue,
+                        overtimeRateValue,
+                        if (target.record == null) 0 else cellColor,
                     )
                 },
                 enabled = canSave,
@@ -3123,6 +3489,40 @@ private fun AttendanceRecordDialog(
             }
         },
     )
+}
+
+@Composable
+private fun AttendanceColorChip(
+    label: String,
+    colorInt: Int,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val swatchColor = resolveAttendanceCellColor(
+        colorInt = colorInt,
+        defaultColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f),
+    )
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .border(
+                width = if (selected) 2.dp else 1.dp,
+                color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(28.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(swatchColor),
+        )
+        Text(label, style = MaterialTheme.typography.labelSmall)
+    }
 }
 
 private fun parseTimeParts(value: String?, defaultHour: Int, defaultMinute: Int): Pair<Int, Int> {

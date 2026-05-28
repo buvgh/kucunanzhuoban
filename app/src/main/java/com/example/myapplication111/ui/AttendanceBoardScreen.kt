@@ -144,7 +144,7 @@ fun AttendanceBoardScreen(
                         AttendanceBodyCell("", width = dayColumnWidth)
                     }
                     AttendanceBodyCell(
-                        text = "${formatAttendanceNumber(totalHours)}h / ${totalDays}天",
+                        text = "${formatAttendanceNumber(totalHours)}h / ${formatAttendanceDayCount(totalDays)}天",
                         width = summaryColumnWidth,
                         fontWeight = FontWeight.Bold,
                     )
@@ -169,9 +169,19 @@ fun AttendanceBoardScreen(
                     } else {
                         detail.cell.records.forEachIndexed { index, record ->
                             val text = if (record.startTime != null && record.endTime != null) {
-                                "${index + 1}. ${record.startTime} - ${record.endTime}  ${formatAttendanceNumber(record.workHours)}h"
+                                buildString {
+                                    append("${index + 1}. ${record.startTime} - ${record.endTime}  ${formatAttendanceNumber(record.workHours)}h")
+                                    if (record.overtimeHours > 0.0 && record.overtimeRate > 0.0) {
+                                        append("  +加班 ${formatAttendanceNumber(record.overtimeHours)}h×¥${formatAttendanceNumber(record.overtimeRate)}")
+                                    }
+                                }
                             } else {
-                                "${index + 1}. ${if (record.isPresent) "已出勤" else "未出勤"}"
+                                buildString {
+                                    append("${index + 1}. ${attendanceRecordStatusText(record)}")
+                                    if (record.overtimeHours > 0.0 && record.overtimeRate > 0.0) {
+                                        append("  +加班 ${formatAttendanceNumber(record.overtimeHours)}h×¥${formatAttendanceNumber(record.overtimeRate)}")
+                                    }
+                                }
                             }
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
@@ -228,17 +238,21 @@ private fun AttendanceDayCell(
             val suffix = if (cell.segmentCount > 1) "(${cell.segmentCount})" else ""
             "${formatAttendanceNumber(cell.totalWorkHours)}h$suffix"
         }
+        cell.attendancePortion in 0.49..0.51 -> "✓/"
         cell.isPresent -> "✓"
         else -> ""
     }
     AttendanceBodyCell(
         text = text,
         width = width,
-        backgroundColor = if (cell != null && (cell.totalWorkHours > 0.0 || cell.isPresent)) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-        } else {
-            MaterialTheme.colorScheme.surface
-        },
+        backgroundColor = resolveAttendanceCellColor(
+            colorInt = cell?.color ?: 0,
+            defaultColor = if (cell != null && (cell.totalWorkHours > 0.0 || cell.isPresent)) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+            } else {
+                MaterialTheme.colorScheme.surface
+            },
+        ),
         onClick = { onOpenDetail(cell) },
     )
 }
@@ -333,11 +347,27 @@ private fun formatAttendanceNumber(value: Double): String {
     }
 }
 
-private fun formatSummaryValue(totalHours: Double, totalDays: Int): String {
+private fun formatSummaryValue(totalHours: Double, totalDays: Double): String {
     return when {
-        totalHours > 0.0 && totalDays > 0 -> "${formatAttendanceNumber(totalHours)}h/${totalDays}天"
+        totalHours > 0.0 && totalDays > 0 -> "${formatAttendanceNumber(totalHours)}h/${formatAttendanceDayCount(totalDays)}天"
         totalHours > 0.0 -> "${formatAttendanceNumber(totalHours)}h"
-        totalDays > 0 -> "${totalDays}天"
+        totalDays > 0 -> "${formatAttendanceDayCount(totalDays)}天"
         else -> ""
+    }
+}
+
+private fun formatAttendanceDayCount(value: Double): String {
+    return if (value % 1.0 == 0.0) {
+        String.format(Locale.getDefault(), "%.0f", value)
+    } else {
+        String.format(Locale.getDefault(), "%.1f", value)
+    }
+}
+
+private fun attendanceRecordStatusText(record: AttendanceEntity): String {
+    return when {
+        !record.isPresent -> "未出勤"
+        record.attendancePortion in 0.49..0.51 -> "半天出勤"
+        else -> "已出勤"
     }
 }

@@ -60,6 +60,113 @@ interface PaymentRecordDao {
     suspend fun delete(record: PaymentRecordEntity)
 }
 
+@Entity(tableName = "fund_projects")
+data class FundProjectEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createTime: Long,
+)
+
+@Entity(
+    tableName = "fund_dates",
+    foreignKeys = [
+        ForeignKey(
+            entity = FundProjectEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["projectId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("projectId"), Index(value = ["projectId", "date"], unique = true)],
+)
+data class FundDateEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val projectId: Long,
+    val date: String,
+)
+
+object FundRecordType {
+    const val INITIAL = 0
+    const val INCOME = 1
+    const val EXPENSE = 2
+}
+
+@Entity(
+    tableName = "fund_records",
+    foreignKeys = [
+        ForeignKey(
+            entity = FundDateEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["dateId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [Index("dateId"), Index("type")],
+)
+data class FundRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val dateId: Long,
+    val type: Int,
+    val name: String,
+    val amount: Double,
+    val remark: String = "",
+    val createTime: Long,
+)
+
+@Dao
+interface FundProjectDao {
+    @Query("SELECT * FROM fund_projects ORDER BY createTime DESC")
+    fun observeAll(): Flow<List<FundProjectEntity>>
+
+    @Query("SELECT * FROM fund_projects WHERE id = :projectId LIMIT 1")
+    fun observeById(projectId: Long): Flow<FundProjectEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(project: FundProjectEntity): Long
+
+    @Query("DELETE FROM fund_projects WHERE id = :projectId")
+    suspend fun deleteById(projectId: Long)
+}
+
+@Dao
+interface FundDateDao {
+    @Query("SELECT * FROM fund_dates ORDER BY date DESC, id DESC")
+    fun observeAll(): Flow<List<FundDateEntity>>
+
+    @Query("SELECT * FROM fund_dates WHERE projectId = :projectId ORDER BY date DESC, id DESC")
+    fun observeForProject(projectId: Long): Flow<List<FundDateEntity>>
+
+    @Query("SELECT * FROM fund_dates WHERE id = :dateId LIMIT 1")
+    fun observeById(dateId: Long): Flow<FundDateEntity?>
+
+    @Query("SELECT * FROM fund_dates WHERE projectId = :projectId AND date = :date LIMIT 1")
+    suspend fun findByProjectAndDate(projectId: Long, date: String): FundDateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(date: FundDateEntity): Long
+
+    @Query("DELETE FROM fund_dates WHERE id = :dateId")
+    suspend fun deleteById(dateId: Long)
+}
+
+@Dao
+interface FundRecordDao {
+    @Query("SELECT * FROM fund_records ORDER BY createTime DESC, id DESC")
+    fun observeAll(): Flow<List<FundRecordEntity>>
+
+    @Query("SELECT * FROM fund_records WHERE dateId = :dateId ORDER BY type ASC, createTime DESC, id DESC")
+    fun observeForDate(dateId: Long): Flow<List<FundRecordEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(record: FundRecordEntity): Long
+
+    @Update
+    suspend fun update(record: FundRecordEntity)
+
+    @Delete
+    suspend fun delete(record: FundRecordEntity)
+}
+
 @Dao
 interface OutboundRecordDao {
     @Query("SELECT * FROM outbound_records ORDER BY id DESC")
@@ -260,8 +367,12 @@ data class AttendanceEntity(
     val endTime: String? = null,
     val workHours: Double = 0.0,
     val isPresent: Boolean = false,
+    val attendancePortion: Double = 0.0,
     val hourlyRateSnapshot: Double = 0.0,
     val dailyRateSnapshot: Double = 0.0,
+    val overtimeHours: Double = 0.0,
+    val overtimeRate: Double = 0.0,
+    val cellColor: Int = 0,
 )
 
 data class AttendanceSummary(
@@ -269,7 +380,7 @@ data class AttendanceSummary(
     val workerName: String,
     val salaryMode: Int,
     val totalWorkHours: Double,
-    val totalPresentDays: Int,
+    val totalPresentDays: Double,
     val totalSalary: Double,
 )
 
@@ -286,7 +397,9 @@ data class AttendanceMonthBoard(
 data class AttendanceDayCell(
     val totalWorkHours: Double = 0.0,
     val isPresent: Boolean = false,
+    val attendancePortion: Double = 0.0,
     val segmentCount: Int = 0,
+    val color: Int = 0,
     val records: List<AttendanceEntity> = emptyList(),
 )
 
@@ -294,7 +407,7 @@ data class AttendanceProjectSummary(
     val projectId: Long,
     val projectName: String,
     val totalWorkHours: Double,
-    val totalPresentDays: Int,
+    val totalPresentDays: Double,
     val totalSalary: Double,
 )
 
@@ -389,6 +502,60 @@ data class DayDetailUi(
     val secondarySaleRecords: List<SecondarySaleRecordEntity>,
     val outboundRecords: List<OutboundRecordEntity>,
     val feeRecords: List<FeeRecordEntity>,
+)
+
+data class FundTotals(
+    val initial: Double = 0.0,
+    val income: Double = 0.0,
+    val expense: Double = 0.0,
+    val balance: Double = 0.0,
+)
+
+data class FundProjectSummaryUi(
+    val id: Long,
+    val name: String,
+    val createTime: Long,
+    val totals: FundTotals,
+)
+
+data class FundDateSummaryUi(
+    val id: Long,
+    val date: String,
+    val totals: FundTotals,
+)
+
+data class FundProjectOverviewUi(
+    val id: Long,
+    val name: String,
+    val totals: FundTotals,
+    val dates: List<FundDateSummaryUi>,
+)
+
+data class FundDayDetailUi(
+    val projectId: Long,
+    val projectName: String,
+    val dateId: Long,
+    val date: String,
+    val totals: FundTotals,
+    val initialRecords: List<FundRecordEntity>,
+    val incomeRecords: List<FundRecordEntity>,
+    val expenseRecords: List<FundRecordEntity>,
+)
+
+data class FundExportDateUi(
+    val id: Long,
+    val date: String,
+    val totals: FundTotals,
+    val initialRecords: List<FundRecordEntity>,
+    val incomeRecords: List<FundRecordEntity>,
+    val expenseRecords: List<FundRecordEntity>,
+)
+
+data class FundProjectExportUi(
+    val id: Long,
+    val name: String,
+    val totals: FundTotals,
+    val dates: List<FundExportDateUi>,
 )
 
 @Dao
@@ -568,14 +735,14 @@ interface AttendanceDao {
             w.name AS workerName,
             COALESCE(MAX(a.salaryModeSnapshot), 0) AS salaryMode,
             COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
-            CAST(COALESCE(COUNT(DISTINCT CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.date END), 0) AS INTEGER) AS totalPresentDays,
+            COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.attendancePortion ELSE 0 END), 0) AS totalPresentDays,
             COALESCE(SUM(
                 CASE
                     WHEN a.salaryModeSnapshot = 0 THEN a.workHours * a.hourlyRateSnapshot
                     WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
                     ELSE 0
                 END
-            ), 0) AS totalSalary
+            ) + SUM(COALESCE(a.overtimeHours * a.overtimeRate, 0)), 0) AS totalSalary
         FROM workers AS w
         LEFT JOIN attendance_records AS a
             ON a.workerId = w.id
@@ -594,14 +761,14 @@ interface AttendanceDao {
             p.id AS projectId,
             p.name AS projectName,
             COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 0 THEN a.workHours ELSE 0 END), 0) AS totalWorkHours,
-            CAST(COALESCE(COUNT(DISTINCT CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.workerId || '-' || a.date END), 0) AS INTEGER) AS totalPresentDays,
+            COALESCE(SUM(CASE WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.attendancePortion ELSE 0 END), 0) AS totalPresentDays,
             COALESCE(SUM(
                 CASE
                     WHEN a.salaryModeSnapshot = 0 THEN a.workHours * a.hourlyRateSnapshot
                     WHEN a.salaryModeSnapshot = 1 AND a.isPresent = 1 THEN a.dailyRateSnapshot
                     ELSE 0
                 END
-            ), 0) AS totalSalary
+            ) + SUM(COALESCE(a.overtimeHours * a.overtimeRate, 0)), 0) AS totalSalary
         FROM projects AS p
         LEFT JOIN attendance_records AS a
             ON a.projectId = p.id
@@ -627,31 +794,37 @@ interface AttendanceDao {
 @Database(
     entities = [
         ProjectEntity::class,
+        FundProjectEntity::class,
         ProjectGroupEntity::class,
         ProjectGroupProjectEntity::class,
         RecordDateEntity::class,
+        FundDateEntity::class,
         StorageRecordEntity::class,
         SecondarySaleRecordEntity::class,
         FeeRecordEntity::class,
         DayPhotoEntity::class,
         OutboundRecordEntity::class,
         PaymentRecordEntity::class,
+        FundRecordEntity::class,
         WorkerEntity::class,
         AttendanceEntity::class,
     ],
-    version = 11,
+    version = 15,
     exportSchema = false,
 )
 abstract class DockNoteDatabase : RoomDatabase() {
     abstract fun projectDao(): ProjectDao
+    abstract fun fundProjectDao(): FundProjectDao
     abstract fun projectGroupDao(): ProjectGroupDao
     abstract fun recordDateDao(): RecordDateDao
+    abstract fun fundDateDao(): FundDateDao
     abstract fun storageRecordDao(): StorageRecordDao
     abstract fun secondarySaleRecordDao(): SecondarySaleRecordDao
     abstract fun feeRecordDao(): FeeRecordDao
     abstract fun dayPhotoDao(): DayPhotoDao
     abstract fun outboundRecordDao(): OutboundRecordDao
     abstract fun paymentRecordDao(): PaymentRecordDao
+    abstract fun fundRecordDao(): FundRecordDao
     abstract fun workerDao(): WorkerDao
     abstract fun attendanceDao(): AttendanceDao
 
@@ -807,8 +980,7 @@ abstract class DockNoteDatabase : RoomDatabase() {
                         dateId INTEGER NOT NULL,
                         name TEXT NOT NULL,
                         weight REAL NOT NULL,
-                        unitPrice REAL NOT NULL DEFAULT 0,
-                        totalAmount REAL NOT NULL DEFAULT 0,
+                        amount REAL NOT NULL DEFAULT 0,
                         FOREIGN KEY(dateId) REFERENCES record_dates(id) ON UPDATE NO ACTION ON DELETE CASCADE
                     )
                     """.trimIndent(),
@@ -819,6 +991,16 @@ abstract class DockNoteDatabase : RoomDatabase() {
 
         private val MIGRATION_10_11 = object : Migration(10, 11) {
             override fun migrate(db: SupportSQLiteDatabase) {
+                val columnNames = buildSet {
+                    val cursor = db.query("PRAGMA table_info(secondary_sale_records)")
+                    cursor.use {
+                        val nameIndex = it.getColumnIndex("name")
+                        while (it.moveToNext()) {
+                            add(it.getString(nameIndex))
+                        }
+                    }
+                }
+
                 db.execSQL(
                     """
                     CREATE TABLE IF NOT EXISTS secondary_sale_records_new (
@@ -832,18 +1014,104 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     )
                     """.trimIndent(),
                 )
-                db.execSQL(
-                    """
-                    INSERT INTO secondary_sale_records_new (id, dateId, name, weight, unitPrice, totalAmount)
-                    SELECT id, dateId, name, weight,
-                           CASE WHEN weight = 0 THEN 0 ELSE amount / weight END,
-                           amount
-                    FROM secondary_sale_records
-                    """.trimIndent(),
-                )
+
+                when {
+                    "amount" in columnNames -> {
+                        db.execSQL(
+                            """
+                            INSERT INTO secondary_sale_records_new (id, dateId, name, weight, unitPrice, totalAmount)
+                            SELECT id, dateId, name, weight,
+                                   CASE WHEN weight = 0 THEN 0 ELSE amount / weight END,
+                                   amount
+                            FROM secondary_sale_records
+                            """.trimIndent(),
+                        )
+                    }
+
+                    "unitPrice" in columnNames && "totalAmount" in columnNames -> {
+                        db.execSQL(
+                            """
+                            INSERT INTO secondary_sale_records_new (id, dateId, name, weight, unitPrice, totalAmount)
+                            SELECT id, dateId, name, weight, unitPrice, totalAmount
+                            FROM secondary_sale_records
+                            """.trimIndent(),
+                        )
+                    }
+                }
+
                 db.execSQL("DROP TABLE secondary_sale_records")
                 db.execSQL("ALTER TABLE secondary_sale_records_new RENAME TO secondary_sale_records")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_secondary_sale_records_dateId ON secondary_sale_records(dateId)")
+            }
+        }
+
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE attendance_records ADD COLUMN cellColor INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE attendance_records ADD COLUMN attendancePortion REAL NOT NULL DEFAULT 0")
+                db.execSQL(
+                    """
+                    UPDATE attendance_records
+                    SET attendancePortion = CASE
+                        WHEN salaryModeSnapshot = 1 AND isPresent = 1 THEN 1.0
+                        ELSE 0.0
+                    END
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE attendance_records ADD COLUMN overtimeHours REAL NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE attendance_records ADD COLUMN overtimeRate REAL NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS fund_projects (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        name TEXT NOT NULL,
+                        createTime INTEGER NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS fund_dates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        projectId INTEGER NOT NULL,
+                        date TEXT NOT NULL,
+                        FOREIGN KEY(projectId) REFERENCES fund_projects(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_fund_dates_projectId ON fund_dates(projectId)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_fund_dates_projectId_date ON fund_dates(projectId, date)")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS fund_records (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        dateId INTEGER NOT NULL,
+                        type INTEGER NOT NULL,
+                        name TEXT NOT NULL,
+                        amount REAL NOT NULL,
+                        remark TEXT NOT NULL DEFAULT '',
+                        createTime INTEGER NOT NULL,
+                        FOREIGN KEY(dateId) REFERENCES fund_dates(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                    )
+                    """.trimIndent(),
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_fund_records_dateId ON fund_records(dateId)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_fund_records_type ON fund_records(type)")
             }
         }
 
@@ -864,6 +1132,10 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     MIGRATION_8_9,
                     MIGRATION_9_10,
                     MIGRATION_10_11,
+                    MIGRATION_11_12,
+                    MIGRATION_12_13,
+                    MIGRATION_13_14,
+                    MIGRATION_14_15,
                 ).build().also { instance = it }
             }
         }
@@ -872,14 +1144,17 @@ abstract class DockNoteDatabase : RoomDatabase() {
 
 class DockNoteRepository private constructor(
     private val projectDao: ProjectDao,
+    private val fundProjectDao: FundProjectDao,
     private val projectGroupDao: ProjectGroupDao,
     private val dateDao: RecordDateDao,
+    private val fundDateDao: FundDateDao,
     private val storageDao: StorageRecordDao,
     private val secondarySaleDao: SecondarySaleRecordDao,
     private val feeDao: FeeRecordDao,
     private val dayPhotoDao: DayPhotoDao,
     private val outboundDao: OutboundRecordDao,
     private val paymentDao: PaymentRecordDao,
+    private val fundRecordDao: FundRecordDao,
     private val workerDao: WorkerDao,
     private val attendanceDao: AttendanceDao,
 ) {
@@ -923,6 +1198,29 @@ class DockNoteRepository private constructor(
                     name = project.name,
                     createTime = project.createTime,
                     totals = buildTotals(projectStorage, projectSecondarySales, projectOutbound, projectFees, projectPayments),
+                )
+            }
+        }
+    }
+
+    fun observeFundProjectSummaries(): Flow<List<FundProjectSummaryUi>> {
+        return combine(
+            fundProjectDao.observeAll(),
+            fundDateDao.observeAll(),
+            fundRecordDao.observeAll(),
+        ) { projects, dates, records ->
+            val datesByProject = dates.groupBy { it.projectId }
+            val recordsByDate = records.groupBy { it.dateId }
+
+            projects.map { project ->
+                val projectRecords = datesByProject[project.id]
+                    .orEmpty()
+                    .flatMap { recordsByDate[it.id].orEmpty() }
+                FundProjectSummaryUi(
+                    id = project.id,
+                    name = project.name,
+                    createTime = project.createTime,
+                    totals = buildFundTotals(projectRecords),
                 )
             }
         }
@@ -1019,6 +1317,62 @@ class DockNoteRepository private constructor(
         }
     }
 
+    fun observeFundProjectOverview(projectId: Long): Flow<FundProjectOverviewUi?> {
+        return combine(
+            fundProjectDao.observeById(projectId),
+            fundDateDao.observeForProject(projectId),
+            fundRecordDao.observeAll(),
+        ) { project, dates, records ->
+            project?.let {
+                val recordsByDate = records.groupBy { record -> record.dateId }
+                val dateSummaries = dates.map { date ->
+                    FundDateSummaryUi(
+                        id = date.id,
+                        date = date.date,
+                        totals = buildFundTotals(recordsByDate[date.id].orEmpty()),
+                    )
+                }
+                val projectRecords = dates.flatMap { date -> recordsByDate[date.id].orEmpty() }
+                FundProjectOverviewUi(
+                    id = it.id,
+                    name = it.name,
+                    totals = buildFundTotals(projectRecords),
+                    dates = dateSummaries,
+                )
+            }
+        }
+    }
+
+    fun observeFundProjectExport(projectId: Long): Flow<FundProjectExportUi?> {
+        return combine(
+            fundProjectDao.observeById(projectId),
+            fundDateDao.observeForProject(projectId),
+            fundRecordDao.observeAll(),
+        ) { project, dates, records ->
+            project?.let {
+                val recordsByDate = records.groupBy { record -> record.dateId }
+                val orderedDates = dates.sortedBy { date -> date.date }
+                val exportDates = orderedDates.map { date ->
+                    val dayRecords = recordsByDate[date.id].orEmpty()
+                    FundExportDateUi(
+                        id = date.id,
+                        date = date.date,
+                        totals = buildFundTotals(dayRecords),
+                        initialRecords = dayRecords.filter { it.type == FundRecordType.INITIAL },
+                        incomeRecords = dayRecords.filter { it.type == FundRecordType.INCOME },
+                        expenseRecords = dayRecords.filter { it.type == FundRecordType.EXPENSE },
+                    )
+                }
+                FundProjectExportUi(
+                    id = it.id,
+                    name = it.name,
+                    totals = buildFundTotals(exportDates.flatMap { date -> date.initialRecords + date.incomeRecords + date.expenseRecords }),
+                    dates = exportDates,
+                )
+            }
+        }
+    }
+
     fun observeDayDetail(projectId: Long, dateId: Long): Flow<DayDetailUi?> {
         return combine(
             projectDao.observeById(projectId),
@@ -1077,6 +1431,29 @@ class DockNoteRepository private constructor(
         }
     }
 
+    fun observeFundDayDetail(projectId: Long, dateId: Long): Flow<FundDayDetailUi?> {
+        return combine(
+            fundProjectDao.observeById(projectId),
+            fundDateDao.observeById(dateId),
+            fundRecordDao.observeForDate(dateId),
+        ) { project, date, records ->
+            if (project == null || date == null || date.projectId != projectId) {
+                null
+            } else {
+                FundDayDetailUi(
+                    projectId = project.id,
+                    projectName = project.name,
+                    dateId = date.id,
+                    date = date.date,
+                    totals = buildFundTotals(records),
+                    initialRecords = records.filter { it.type == FundRecordType.INITIAL },
+                    incomeRecords = records.filter { it.type == FundRecordType.INCOME },
+                    expenseRecords = records.filter { it.type == FundRecordType.EXPENSE },
+                )
+            }
+        }
+    }
+
     suspend fun createProject(name: String) {
         val normalizedName = name.trim()
         if (normalizedName.isBlank()) return
@@ -1088,8 +1465,23 @@ class DockNoteRepository private constructor(
         )
     }
 
+    suspend fun createFundProject(name: String) {
+        val normalizedName = name.trim()
+        if (normalizedName.isBlank()) return
+        fundProjectDao.insert(
+            FundProjectEntity(
+                name = normalizedName,
+                createTime = System.currentTimeMillis(),
+            ),
+        )
+    }
+
     suspend fun deleteProject(projectId: Long) {
         projectDao.deleteById(projectId)
+    }
+
+    suspend fun deleteFundProject(projectId: Long) {
+        fundProjectDao.deleteById(projectId)
     }
 
     suspend fun createProjectGroup(name: String, projectIds: List<Long>): Long {
@@ -1131,8 +1523,16 @@ class DockNoteRepository private constructor(
         return ensureDate(projectId, date.trim())
     }
 
+    suspend fun createFundDate(projectId: Long, date: String): Long {
+        return ensureFundDate(projectId, date.trim())
+    }
+
     suspend fun deleteDate(dateId: Long) {
         dateDao.deleteById(dateId)
+    }
+
+    suspend fun deleteFundDate(dateId: Long) {
+        fundDateDao.deleteById(dateId)
     }
 
     suspend fun addStorageRecord(
@@ -1359,6 +1759,34 @@ class DockNoteRepository private constructor(
         paymentDao.delete(record)
     }
 
+    suspend fun addFundRecord(dateId: Long, type: Int, name: String, amount: Double, remark: String) {
+        require(type in setOf(FundRecordType.INITIAL, FundRecordType.INCOME, FundRecordType.EXPENSE)) { "资金类型不合法" }
+        fundRecordDao.insert(
+            FundRecordEntity(
+                dateId = dateId,
+                type = type,
+                name = name.trim(),
+                amount = amount,
+                remark = remark.trim(),
+                createTime = System.currentTimeMillis(),
+            ),
+        )
+    }
+
+    suspend fun updateFundRecord(record: FundRecordEntity, name: String, amount: Double, remark: String) {
+        fundRecordDao.update(
+            record.copy(
+                name = name.trim(),
+                amount = amount,
+                remark = remark.trim(),
+            ),
+        )
+    }
+
+    suspend fun deleteFundRecord(record: FundRecordEntity) {
+        fundRecordDao.delete(record)
+    }
+
     fun observeWorkers(projectId: Long): Flow<List<WorkerEntity>> = workerDao.observeForProject(projectId)
 
     fun observeAttendanceRecords(): Flow<List<AttendanceEntity>> = attendanceDao.observeAll()
@@ -1388,11 +1816,16 @@ class DockNoteRepository private constructor(
                     .orEmpty()
                     .groupBy { it.date.substringAfterLast("-").toInt() }
                     .mapValues { (_, dayRecords) ->
+                        val orderedRecords = dayRecords.sortedWith(
+                            compareBy<AttendanceEntity> { it.startTime.orEmpty() }.thenBy { it.id },
+                        )
                         AttendanceDayCell(
-                            totalWorkHours = dayRecords.sumOf { it.workHours },
-                            isPresent = dayRecords.any { it.isPresent },
-                            segmentCount = dayRecords.size,
-                            records = dayRecords.sortedBy { it.startTime.orEmpty() },
+                            totalWorkHours = orderedRecords.sumOf { it.workHours },
+                            isPresent = orderedRecords.any { it.isPresent },
+                            attendancePortion = orderedRecords.maxOfOrNull { it.attendancePortion } ?: 0.0,
+                            segmentCount = orderedRecords.size,
+                            color = orderedRecords.lastOrNull { it.cellColor != 0 }?.cellColor ?: 0,
+                            records = orderedRecords,
                         )
                     }
 
@@ -1478,8 +1911,12 @@ class DockNoteRepository private constructor(
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
+        attendancePortion: Double,
         hourlyRate: Double?,
         dailyRate: Double?,
+        overtimeHours: Double,
+        overtimeRate: Double,
+        cellColor: Int = 0,
     ): Long {
         val worker = workerDao.getById(workerId) ?: error("人员不存在")
         require(worker.projectId == projectId) { "该人员不属于当前项目" }
@@ -1492,10 +1929,22 @@ class DockNoteRepository private constructor(
             startTime = startTime,
             endTime = endTime,
             isPresent = isPresent,
+            attendancePortion = attendancePortion,
             hourlyRate = hourlyRate,
             dailyRate = dailyRate,
+            overtimeHours = overtimeHours,
+            overtimeRate = overtimeRate,
+            cellColor = cellColor,
         )
-        rememberWorkerRates(worker, record.hourlyRateSnapshot, record.dailyRateSnapshot)
+        rememberWorkerRates(
+            worker = worker,
+            hourlyRate = record.hourlyRateSnapshot,
+            dailyRate = if (record.salaryModeSnapshot == SalaryMode.DAILY && record.attendancePortion in 0.0..0.99) {
+                worker.dailyRate
+            } else {
+                record.dailyRateSnapshot
+            },
+        )
         return attendanceDao.insert(record)
     }
 
@@ -1506,8 +1955,12 @@ class DockNoteRepository private constructor(
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
+        attendancePortion: Double,
         hourlyRate: Double?,
         dailyRate: Double?,
+        overtimeHours: Double,
+        overtimeRate: Double,
+        cellColor: Int,
     ) {
         val existing = attendanceDao.getById(attendanceId) ?: error("考勤记录不存在")
         val worker = workerDao.getById(existing.workerId) ?: error("人员不存在")
@@ -1521,10 +1974,22 @@ class DockNoteRepository private constructor(
             startTime = startTime,
             endTime = endTime,
             isPresent = isPresent,
+            attendancePortion = attendancePortion,
             hourlyRate = hourlyRate,
             dailyRate = dailyRate,
+            overtimeHours = overtimeHours,
+            overtimeRate = overtimeRate,
+            cellColor = cellColor,
         )
-        rememberWorkerRates(worker, record.hourlyRateSnapshot, record.dailyRateSnapshot)
+        rememberWorkerRates(
+            worker = worker,
+            hourlyRate = record.hourlyRateSnapshot,
+            dailyRate = if (record.salaryModeSnapshot == SalaryMode.DAILY && record.attendancePortion in 0.0..0.99) {
+                worker.dailyRate
+            } else {
+                record.dailyRateSnapshot
+            },
+        )
         attendanceDao.update(record)
     }
 
@@ -1539,6 +2004,13 @@ class DockNoteRepository private constructor(
         return dateDao.insert(RecordDateEntity(projectId = projectId, date = date))
     }
 
+    private suspend fun ensureFundDate(projectId: Long, date: String): Long {
+        require(date.isNotBlank())
+        val existing = fundDateDao.findByProjectAndDate(projectId, date)
+        if (existing != null) return existing.id
+        return fundDateDao.insert(FundDateEntity(projectId = projectId, date = date))
+    }
+
     private fun buildAttendanceRecord(
         existingId: Long,
         projectId: Long,
@@ -1548,8 +2020,12 @@ class DockNoteRepository private constructor(
         startTime: String?,
         endTime: String?,
         isPresent: Boolean,
+        attendancePortion: Double,
         hourlyRate: Double?,
         dailyRate: Double?,
+        overtimeHours: Double,
+        overtimeRate: Double,
+        cellColor: Int,
     ): AttendanceEntity {
         val normalizedDate = date.trim()
         require(normalizedDate.isNotBlank()) { "考勤日期不能为空" }
@@ -1561,6 +2037,7 @@ class DockNoteRepository private constructor(
                 val normalizedHourlyRate = hourlyRate ?: worker.hourlyRate
                 require(start.isNotBlank() && end.isNotBlank()) { "计时人员必须填写起始和结束时间" }
                 require(normalizedHourlyRate >= 0.0) { "时薪不能小于 0" }
+                require(overtimeHours >= 0.0 && overtimeRate >= 0.0) { "加班信息不能小于 0" }
 
                 AttendanceEntity(
                     id = existingId,
@@ -1572,13 +2049,27 @@ class DockNoteRepository private constructor(
                     endTime = end,
                     workHours = AttendanceCalculator.calculateWorkHours(start, end),
                     isPresent = true,
+                    attendancePortion = 0.0,
                     hourlyRateSnapshot = normalizedHourlyRate,
                     dailyRateSnapshot = 0.0,
+                    overtimeHours = overtimeHours,
+                    overtimeRate = overtimeRate,
+                    cellColor = cellColor,
                 )
             }
             SalaryMode.DAILY -> {
                 val normalizedDailyRate = dailyRate ?: worker.dailyRate
                 require(normalizedDailyRate >= 0.0) { "日薪不能小于 0" }
+                require(overtimeHours >= 0.0 && overtimeRate >= 0.0) { "加班信息不能小于 0" }
+                val normalizedPortion = if (isPresent) {
+                    when {
+                        attendancePortion >= 0.99 -> 1.0
+                        attendancePortion > 0.0 -> 0.5
+                        else -> 1.0
+                    }
+                } else {
+                    0.0
+                }
                 AttendanceEntity(
                     id = existingId,
                     projectId = projectId,
@@ -1589,8 +2080,12 @@ class DockNoteRepository private constructor(
                     endTime = null,
                     workHours = 0.0,
                     isPresent = isPresent,
+                    attendancePortion = normalizedPortion,
                     hourlyRateSnapshot = 0.0,
                     dailyRateSnapshot = normalizedDailyRate,
+                    overtimeHours = overtimeHours,
+                    overtimeRate = overtimeRate,
+                    cellColor = cellColor,
                 )
             }
             else -> error("考勤模式不合法")
@@ -1610,6 +2105,18 @@ class DockNoteRepository private constructor(
 
     private fun normalizeFeeType(type: String): String {
         return type.ifBlank { FeeTypes.LABOR }
+    }
+
+    private fun buildFundTotals(records: List<FundRecordEntity>): FundTotals {
+        val initial = records.filter { it.type == FundRecordType.INITIAL }.sumOf { it.amount }
+        val income = records.filter { it.type == FundRecordType.INCOME }.sumOf { it.amount }
+        val expense = records.filter { it.type == FundRecordType.EXPENSE }.sumOf { it.amount }
+        return FundTotals(
+            initial = initial,
+            income = income,
+            expense = expense,
+            balance = initial + income - expense,
+        )
     }
 
     private fun buildTotals(
@@ -1749,14 +2256,17 @@ class DockNoteRepository private constructor(
                     val db = DockNoteDatabase.getInstance(context)
                 instance ?: DockNoteRepository(
                     projectDao = db.projectDao(),
+                    fundProjectDao = db.fundProjectDao(),
                     projectGroupDao = db.projectGroupDao(),
                     dateDao = db.recordDateDao(),
+                    fundDateDao = db.fundDateDao(),
                     storageDao = db.storageRecordDao(),
                     secondarySaleDao = db.secondarySaleRecordDao(),
                     feeDao = db.feeRecordDao(),
                     dayPhotoDao = db.dayPhotoDao(),
                     outboundDao = db.outboundRecordDao(),
                     paymentDao = db.paymentRecordDao(),
+                    fundRecordDao = db.fundRecordDao(),
                     workerDao = db.workerDao(),
                     attendanceDao = db.attendanceDao(),
                 ).also { instance = it }
