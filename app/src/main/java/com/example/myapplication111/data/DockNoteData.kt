@@ -1121,7 +1121,8 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     context.applicationContext,
                     DockNoteDatabase::class.java,
                     "dock_note.db",
-                ).addMigrations(
+                ).setJournalMode(RoomDatabase.JournalMode.TRUNCATE)
+                .addMigrations(
                     MIGRATION_1_2,
                     MIGRATION_2_3,
                     MIGRATION_3_4,

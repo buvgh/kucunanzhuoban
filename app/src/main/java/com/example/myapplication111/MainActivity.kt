@@ -86,7 +86,8 @@ class MainActivity : ComponentActivity() {
     private fun isDatabaseIntent(intent: Intent?, uri: Uri): Boolean {
         val mimeType = intent?.type ?: contentResolver.getType(uri)
         val path = uri.toString().lowercase()
-        return mimeType == "application/octet-stream" || path.endsWith(".db")
+        val name = resolveDisplayName(uri)?.lowercase() ?: ""
+        return mimeType == "application/octet-stream" || path.endsWith(".db") || name.endsWith(".db")
     }
 
     private fun resolveDisplayName(uri: Uri): String? {

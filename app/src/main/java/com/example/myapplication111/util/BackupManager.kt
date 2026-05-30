@@ -63,10 +63,11 @@ object BackupManager {
     suspend fun restoreBackup(context: Context, backupFile: File) = withContext(Dispatchers.IO) {
         try {
             val dbFile = context.getDatabasePath(DB_NAME)
-            // It's safer to close the database before restoring, 
-            // but in this simple app, we'll just overwrite and rely on the next restart 
-            // or Room's internal error handling if it's currently open.
-            // Ideally, we should notify the ViewModel to close DB or use a broadcast.
+            
+            // Safe restore: Close DB and clear WAL/SHM
+            com.example.myapplication111.data.DockNoteDatabase.getInstance(context).close()
+            File(dbFile.path + "-wal").delete()
+            File(dbFile.path + "-shm").delete()
             
             FileInputStream(backupFile).use { input ->
                 FileOutputStream(dbFile).use { output ->
@@ -84,6 +85,12 @@ object BackupManager {
     suspend fun restoreFromUri(context: Context, uri: Uri) = withContext(Dispatchers.IO) {
         try {
             val dbFile = context.getDatabasePath(DB_NAME)
+            
+            // Safe restore: Close DB and clear WAL/SHM
+            com.example.myapplication111.data.DockNoteDatabase.getInstance(context).close()
+            File(dbFile.path + "-wal").delete()
+            File(dbFile.path + "-shm").delete()
+            
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(dbFile).use { output ->
                     input.copyTo(output)
