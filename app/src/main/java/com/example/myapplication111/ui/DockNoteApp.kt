@@ -48,6 +48,9 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import android.widget.Toast
 import com.example.myapplication111.util.BackupManager
+import com.example.myapplication111.util.DatabaseMerger
+import com.example.myapplication111.util.ConflictResolutionMode
+import com.example.myapplication111.util.ConflictPrecheckResult
 import com.example.myapplication111.util.ExportManager
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.KeyboardOptions
@@ -148,6 +151,7 @@ import java.time.YearMonth
 import java.util.Locale
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import android.content.Context
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -227,7 +231,10 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
 
     val itemNames by viewModel.uniqueItemNames.collectAsState()
 
-    var showBackupDialog by rememberSaveable { mutableStateOf(false) }
+    var showBackupDialog by remember { mutableStateOf(false) }
+    var showConflictDialog by remember { mutableStateOf(false) }
+    var conflictResult by remember { mutableStateOf<ConflictPrecheckResult?>(null) }
+    var searchKeyword by remember { mutableStateOf("") }
     var showWorkerDialog by rememberSaveable { mutableStateOf(false) }
     var attendanceEditTarget by remember { mutableStateOf<AttendanceEditTarget?>(null) }
     val workers by remember(currentProjectId) {
@@ -776,6 +783,18 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
         )
     }
 
+    val handleMergeResult = { ctx: Context, success: Boolean ->
+        if (success) {
+            Toast.makeText(ctx, "导入合并成功，正在重启应用...", Toast.LENGTH_LONG).show()
+            val intent = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+            intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+            ctx.startActivity(intent)
+            Runtime.getRuntime().exit(0)
+        } else {
+            Toast.makeText(ctx, "数据合并失败", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     if (showBackupDialog) {
         BackupManagementDialog(
             onDismiss = { showBackupDialog = false },
@@ -785,15 +804,17 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             },
             onRestoreFromUri = { uri ->
                 coroutineScope.launch {
-                    val success = BackupManager.restoreFromUri(context, uri)
-                    if (success) {
-                        android.widget.Toast.makeText(context, "还原成功，正在重启应用...", android.widget.Toast.LENGTH_LONG).show()
-                        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                        intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                        context.startActivity(intent)
-                        Runtime.getRuntime().exit(0)
-                    } else {
-                        android.widget.Toast.makeText(context, "数据还原失败", android.widget.Toast.LENGTH_SHORT).show()
+                    try {
+                        val precheck = DatabaseMerger.precheckConflicts(context, uri)
+                        if (precheck.hasConflicts) {
+                            conflictResult = precheck
+                            showConflictDialog = true
+                        } else {
+                            val success = DatabaseMerger.mergeDatabase(context, precheck.tempDbFile, ConflictResolutionMode.MERGE)
+                            handleMergeResult(context, success)
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "读取备份文件失败", Toast.LENGTH_SHORT).show()
                     }
                 }
                 showBackupDialog = false
@@ -804,6 +825,42 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 }
             },
             backups = BackupManager.getBackups(context)
+        )
+    }
+
+    if (showConflictDialog && conflictResult != null) {
+        AlertDialog(
+            onDismissRequest = {
+                showConflictDialog = false
+                conflictResult?.tempDbFile?.delete()
+                conflictResult = null
+            },
+            title = { Text("检测到同名项目") },
+            text = { Text("导入的数据中，存在与当前系统同名的项目。\n请选择处理方式：\n\n【合并】：导入的记录将追加到您现有的同名项目中。\n【独立导入】：自动为导入的项目加上“(导入)”后缀作为新项目。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConflictDialog = false
+                        coroutineScope.launch {
+                            val success = DatabaseMerger.mergeDatabase(context, conflictResult!!.tempDbFile, ConflictResolutionMode.MERGE)
+                            conflictResult = null
+                            handleMergeResult(context, success)
+                        }
+                    }
+                ) { Text("合并到现有项目") }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showConflictDialog = false
+                        coroutineScope.launch {
+                            val success = DatabaseMerger.mergeDatabase(context, conflictResult!!.tempDbFile, ConflictResolutionMode.RENAME_NEW)
+                            conflictResult = null
+                            handleMergeResult(context, success)
+                        }
+                    }
+                ) { Text("加上后缀独立导入") }
+            }
         )
     }
 
