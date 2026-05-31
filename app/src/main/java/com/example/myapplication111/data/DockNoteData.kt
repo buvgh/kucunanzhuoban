@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Dao
 import androidx.room.Database
 import androidx.room.Delete
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -339,6 +340,7 @@ data class WorkerEntity(
     val salaryMode: Int,
     val hourlyRate: Double = 0.0,
     val dailyRate: Double = 0.0,
+    @ColumnInfo(defaultValue = "") val hiddenMonths: String = "",
 )
 
 @Entity(
@@ -749,6 +751,7 @@ interface AttendanceDao {
             AND a.projectId = :projectId
             AND substr(a.date, 1, 7) = :month
         WHERE w.projectId = :projectId
+          AND w.hiddenMonths NOT LIKE '%' || :month || '%'
         GROUP BY w.id, w.name
         ORDER BY w.id DESC
         """
@@ -809,7 +812,7 @@ interface AttendanceDao {
         WorkerEntity::class,
         AttendanceEntity::class,
     ],
-    version = 15,
+    version = 16,
     exportSchema = false,
 )
 abstract class DockNoteDatabase : RoomDatabase() {
@@ -1115,6 +1118,12 @@ abstract class DockNoteDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE workers ADD COLUMN hiddenMonths TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getInstance(context: Context): DockNoteDatabase {
             return instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -1137,6 +1146,7 @@ abstract class DockNoteDatabase : RoomDatabase() {
                     MIGRATION_12_13,
                     MIGRATION_13_14,
                     MIGRATION_14_15,
+                    MIGRATION_15_16,
                 ).build().also { instance = it }
             }
         }
@@ -1898,6 +1908,10 @@ class DockNoteRepository private constructor(
                 dailyRate = dailyRate,
             ),
         )
+    }
+
+    suspend fun saveWorker(worker: WorkerEntity) {
+        workerDao.update(worker)
     }
 
     suspend fun deleteWorker(worker: WorkerEntity) {

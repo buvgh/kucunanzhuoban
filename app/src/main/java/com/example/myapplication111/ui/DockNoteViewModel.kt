@@ -444,6 +444,20 @@ class DockNoteViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun toggleWorkerVisibility(worker: WorkerEntity, month: String) {
+        viewModelScope.launch {
+            val hiddenList = worker.hiddenMonths.split(",").filter { it.isNotBlank() }.toMutableSet()
+            if (hiddenList.contains(month)) {
+                hiddenList.remove(month)
+            } else {
+                hiddenList.add(month)
+            }
+            val updatedWorker = worker.copy(hiddenMonths = hiddenList.joinToString(","))
+            repository.saveWorker(updatedWorker)
+            BackupManager.backupDatabase(getApplication())
+        }
+    }
+
     fun debugFillMockData() {
         viewModelScope.launch {
             repository.debugFillMockData()

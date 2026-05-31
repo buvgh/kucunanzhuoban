@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.Inbox
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
@@ -578,6 +580,7 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                             },
                             onAddWorker = { showWorkerDialog = true },
                             onDeleteWorker = viewModel::deleteWorker,
+                            onToggleWorkerVisibility = viewModel::toggleWorkerVisibility,
                             onAddAttendanceForCell = { workerId, workerName, date ->
                                 val worker = workers.firstOrNull { it.id == workerId }
                                 if (worker != null) {
@@ -1694,6 +1697,7 @@ private fun DayDetailScreen(
     onAddFee: () -> Unit,
     onAddWorker: () -> Unit,
     onDeleteWorker: (WorkerEntity) -> Unit,
+    onToggleWorkerVisibility: (WorkerEntity, String) -> Unit,
     onAddAttendanceForCell: (Long, String, String) -> Unit,
     onEditAttendance: (Long, String, AttendanceEntity) -> Unit,
     onDeleteAttendance: (AttendanceEntity) -> Unit,
@@ -1928,6 +1932,7 @@ private fun DayDetailScreen(
                             boards = attendanceBoards,
                             onAddWorker = onAddWorker,
                             onDeleteWorker = onDeleteWorker,
+                            onToggleWorkerVisibility = onToggleWorkerVisibility,
                             onAddAttendanceForCell = onAddAttendanceForCell,
                             onEditAttendance = onEditAttendance,
                             onDeleteAttendance = onDeleteAttendance,
@@ -1949,6 +1954,7 @@ private fun AttendanceTabContent(
     boards: List<AttendanceMonthBoard>,
     onAddWorker: () -> Unit,
     onDeleteWorker: (WorkerEntity) -> Unit,
+    onToggleWorkerVisibility: (WorkerEntity, String) -> Unit,
     onAddAttendanceForCell: (Long, String, String) -> Unit,
     onEditAttendance: (Long, String, AttendanceEntity) -> Unit,
     onDeleteAttendance: (AttendanceEntity) -> Unit,
@@ -1962,6 +1968,7 @@ private fun AttendanceTabContent(
         val existingWorkerIds = currentRows.map { it.summary.workerId }.toSet()
         val missingRows = workers
             .filterNot { it.id in existingWorkerIds }
+            .filterNot { it.hiddenMonths.split(",").contains(currentMonth) }
             .map { worker ->
                 AttendanceDashboardRow(
                     summary = AttendanceSummary(
@@ -2037,7 +2044,12 @@ private fun AttendanceTabContent(
                         Spacer(modifier = Modifier.height(8.dp))
                         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             workers.forEach { worker ->
-                                WorkerCompactRow(worker = worker, onDelete = { onDeleteWorker(worker) })
+                                WorkerCompactRow(
+                                    worker = worker,
+                                    isHiddenForCurrentMonth = worker.hiddenMonths.split(",").contains(currentMonth),
+                                    onToggleVisibility = { onToggleWorkerVisibility(worker, currentMonth) },
+                                    onDelete = { onDeleteWorker(worker) }
+                                )
                             }
                         }
                     }
@@ -2205,6 +2217,8 @@ private fun AttendanceProjectSummaryCard(
 @Composable
 private fun WorkerCompactRow(
     worker: WorkerEntity,
+    isHiddenForCurrentMonth: Boolean,
+    onToggleVisibility: () -> Unit,
     onDelete: () -> Unit,
 ) {
     var showDeleteConfirm by remember { mutableStateOf(false) }
@@ -2225,8 +2239,18 @@ private fun WorkerCompactRow(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            IconButton(modifier = Modifier.size(32.dp), onClick = { showDeleteConfirm = true }) {
-                Icon(Icons.Default.Delete, contentDescription = "删除人员", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(modifier = Modifier.size(32.dp), onClick = onToggleVisibility) {
+                    Icon(
+                        if (isHiddenForCurrentMonth) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                        contentDescription = if (isHiddenForCurrentMonth) "显示该人员" else "隐藏该人员",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (isHiddenForCurrentMonth) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f) else MaterialTheme.colorScheme.primary
+                    )
+                }
+                IconButton(modifier = Modifier.size(32.dp), onClick = { showDeleteConfirm = true }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除人员", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

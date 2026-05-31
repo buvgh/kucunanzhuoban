@@ -1,0 +1,23 @@
+name: Yinyue
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: 16.0
+targets:
+  Yinyue:
+    type: application
+    platform: iOS
+    sources: [Sources/Yinyue]
+    info:
+      path: Sources/Yinyue/Info.plist
+      properties:
+        UIBackgroundModes: [audio]
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+            CPTemplateApplicationSceneSessionRoleApplication:
+              - UISceneConfigurationName: CarPlay Configuration
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).CarPlaySceneDelegate
