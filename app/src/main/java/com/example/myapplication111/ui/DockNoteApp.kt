@@ -2,6 +2,9 @@ package com.example.myapplication111.ui
 
 import android.app.Activity
 import android.content.Intent
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -780,15 +783,25 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
                 viewModel.restoreBackup(file)
                 showBackupDialog = false
             },
+            onRestoreFromUri = { uri ->
+                coroutineScope.launch {
+                    val success = BackupManager.restoreFromUri(context, uri)
+                    if (success) {
+                        android.widget.Toast.makeText(context, "还原成功，正在重启应用...", android.widget.Toast.LENGTH_LONG).show()
+                        val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+                        intent?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        context.startActivity(intent)
+                        Runtime.getRuntime().exit(0)
+                    } else {
+                        android.widget.Toast.makeText(context, "数据还原失败", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                }
+                showBackupDialog = false
+            },
             onExportAll = {
                 coroutineScope.launch {
                     BackupManager.exportAndShareDatabase(context)
                 }
-            },
-            onDebugFill = {
-                viewModel.debugFillMockData()
-                Toast.makeText(context, "正在注入数据...", Toast.LENGTH_SHORT).show()
-                showBackupDialog = false
             },
             backups = BackupManager.getBackups(context)
         )
@@ -3936,10 +3949,14 @@ private fun FeeRecordDialog(
 private fun BackupManagementDialog(
     onDismiss: () -> Unit,
     onRestore: (File) -> Unit,
+    onRestoreFromUri: (Uri) -> Unit,
     onExportAll: () -> Unit,
-    onDebugFill: () -> Unit,
     backups: List<File>,
 ) {
+    val context = LocalContext.current
+    val filePickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        uri?.let { onRestoreFromUri(it) }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("数据备份与恢复") },
@@ -3955,6 +3972,17 @@ private fun BackupManagementDialog(
                     Text("导出全部数据分享")
                 }
                 
+                Spacer(modifier = Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = { filePickerLauncher.launch("*/*") },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Add, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("从本地文件夹导入数据")
+                }
+
                 Spacer(modifier = Modifier.height(16.dp))
                 Text("本地备份记录 (最近5次)：", style = MaterialTheme.typography.labelMedium)
                 Spacer(modifier = Modifier.height(8.dp))
@@ -3985,16 +4013,6 @@ private fun BackupManagementDialog(
                 Text("提示：还原备份将覆盖当前所有数据，完成后应用将自动重启。", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                 
                 Spacer(modifier = Modifier.height(16.dp))
-                OutlinedButton(
-                    onClick = onDebugFill,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("注入性能测试数据 (1000条)")
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-                val context = LocalContext.current
                 val packageInfo = remember {
                     try {
                         context.packageManager.getPackageInfo(context.packageName, 0)
