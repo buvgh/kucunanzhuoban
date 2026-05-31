@@ -1392,8 +1392,8 @@ private fun ProjectOverviewScreen(
 
         item {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.Start,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
@@ -1401,9 +1401,6 @@ private fun ProjectOverviewScreen(
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
-                TextButton(onClick = onDeleteProject) {
-                    Text("删除项目", color = MaterialTheme.colorScheme.error)
-                }
             }
         }
         if (groupedDates.isEmpty()) {
@@ -1422,10 +1419,11 @@ private fun ProjectOverviewScreen(
                                 collapsedMonths = if (isCollapsed) collapsedMonths - month else collapsedMonths + month
                             }
                             .padding(vertical = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.Start,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
                         TextButton(
                             onClick = {
                                 collapsedMonths = if (isCollapsed) collapsedMonths - month else collapsedMonths + month
