@@ -11,6 +11,17 @@ import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import android.widget.VideoView
 import androidx.lifecycle.lifecycleScope
 import com.example.myapplication111.ui.theme.MyApplication111Theme
 import com.example.myapplication111.ui.DockNoteApp
@@ -37,8 +48,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val darkMode by viewModel.isDarkMode.collectAsState()
+            var showSplash by remember { mutableStateOf(true) }
+            
             MyApplication111Theme(darkTheme = darkMode) {
-                DockNoteApp(viewModel = viewModel)
+                if (showSplash) {
+                    VideoSplashScreen(onSplashFinished = { showSplash = false })
+                } else {
+                    DockNoteApp(viewModel = viewModel)
+                }
             }
         }
     }
@@ -108,4 +125,28 @@ class MainActivity : ComponentActivity() {
         startActivity(intent)
         Runtime.getRuntime().exit(0)
     }
+}
+
+@Composable
+fun VideoSplashScreen(onSplashFinished: () -> Unit) {
+    AndroidView(
+        factory = { context ->
+            VideoView(context).apply {
+                val videoPath = "android.resource://${context.packageName}/${R.raw.splash_animation}"
+                setVideoURI(Uri.parse(videoPath))
+                setOnCompletionListener {
+                    onSplashFinished()
+                }
+                setOnErrorListener { _, _, _ ->
+                    onSplashFinished()
+                    true
+                }
+                start()
+            }
+        },
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .clickable { onSplashFinished() }
+    )
 }
