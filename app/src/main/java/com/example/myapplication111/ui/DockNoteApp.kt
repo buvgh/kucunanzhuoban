@@ -1335,19 +1335,24 @@ private fun ProjectOverviewScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
-                    .clickable { paymentExpanded = !paymentExpanded }
                     .padding(vertical = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("付款记录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Icon(
-                        if (paymentExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-                        contentDescription = "展开/收起",
-                        modifier = Modifier.padding(start = 4.dp).size(22.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    TextButton(
+                        onClick = { paymentExpanded = !paymentExpanded },
+                        modifier = Modifier.padding(start = 8.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(if (paymentExpanded) "收起" else "展开", style = MaterialTheme.typography.labelMedium)
+                        Icon(
+                            if (paymentExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = "展开/收起",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
                 TextButton(onClick = onAddPayment) {
                     Text("登记付款", style = MaterialTheme.typography.labelLarge)
