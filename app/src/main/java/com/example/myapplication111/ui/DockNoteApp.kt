@@ -1308,6 +1308,7 @@ private fun ProjectOverviewScreen(
     onEditPayment: (PaymentRecordEntity) -> Unit,
     onDeletePayment: (PaymentRecordEntity) -> Unit,
 ) {
+    var paymentExpanded by rememberSaveable { mutableStateOf(false) }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1330,28 +1331,51 @@ private fun ProjectOverviewScreen(
         }
         
         item {
-            SectionHeader("付款记录", actionLabel = "登记付款", onAction = onAddPayment)
-        }
-
-        if (overview.paymentRecords.isEmpty()) {
-            item {
-                Surface(
-                    modifier = Modifier.fillMaxWidth().height(60.dp),
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Text("暂无付款记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .clickable { paymentExpanded = !paymentExpanded }
+                    .padding(vertical = 4.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("付款记录", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Icon(
+                        if (paymentExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                        contentDescription = "展开/收起",
+                        modifier = Modifier.padding(start = 4.dp).size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                TextButton(onClick = onAddPayment) {
+                    Text("登记付款", style = MaterialTheme.typography.labelLarge)
                 }
             }
-        } else {
-            items(overview.paymentRecords) { record ->
-                PaymentRecordCard(
-                    record = record,
-                    onEdit = { onEditPayment(record) },
-                    onDelete = { onDeletePayment(record) }
-                )
+        }
+
+        if (paymentExpanded) {
+            if (overview.paymentRecords.isEmpty()) {
+                item {
+                    Surface(
+                        modifier = Modifier.fillMaxWidth().height(60.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text("暂无付款记录", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                items(overview.paymentRecords) { record ->
+                    PaymentRecordCard(
+                        record = record,
+                        onEdit = { onEditPayment(record) },
+                        onDelete = { onDeletePayment(record) }
+                    )
+                }
             }
         }
 
