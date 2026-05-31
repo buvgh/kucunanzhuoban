@@ -1309,6 +1309,12 @@ private fun ProjectOverviewScreen(
     onDeletePayment: (PaymentRecordEntity) -> Unit,
 ) {
     var paymentExpanded by rememberSaveable { mutableStateOf(false) }
+    val groupedDates = remember(overview.dates) {
+        overview.dates.groupBy { if (it.date.length >= 7) it.date.substring(0, 7) else "未知月份" }
+            .toSortedMap(reverseOrder())
+    }
+    var collapsedMonths by remember { mutableStateOf(emptySet<String>()) }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(16.dp),
@@ -1400,17 +1406,51 @@ private fun ProjectOverviewScreen(
                 }
             }
         }
-        if (overview.dates.isEmpty()) {
+        if (groupedDates.isEmpty()) {
             item {
                 EmptyState("还没有日期记录，点击右下角按钮新建。")
             }
         } else {
-            items(overview.dates, key = { it.id }) { dateSummary ->
-                DateCard(
-                    dateSummary = dateSummary,
-                    onClick = { onOpenDate(dateSummary.id) },
-                    onDelete = { onDeleteDate(dateSummary.id) },
-                )
+            groupedDates.forEach { (month, datesInMonth) ->
+                item(key = "month_header_$month") {
+                    val isCollapsed = collapsedMonths.contains(month)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 8.dp)
+                            .clickable {
+                                collapsedMonths = if (isCollapsed) collapsedMonths - month else collapsedMonths + month
+                            }
+                            .padding(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(month, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                        TextButton(
+                            onClick = {
+                                collapsedMonths = if (isCollapsed) collapsedMonths - month else collapsedMonths + month
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(if (isCollapsed) "展开" else "收起", style = MaterialTheme.typography.labelMedium)
+                            Icon(
+                                if (isCollapsed) Icons.Default.ExpandMore else Icons.Default.ExpandLess,
+                                contentDescription = "展开/收起",
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+                }
+                
+                if (!collapsedMonths.contains(month)) {
+                    items(datesInMonth, key = { it.id }) { dateSummary ->
+                        DateCard(
+                            dateSummary = dateSummary,
+                            onClick = { onOpenDate(dateSummary.id) },
+                            onDelete = { onDeleteDate(dateSummary.id) },
+                        )
+                    }
+                }
             }
         }
     }
