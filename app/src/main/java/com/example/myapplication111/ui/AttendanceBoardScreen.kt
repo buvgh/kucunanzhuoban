@@ -140,8 +140,16 @@ fun AttendanceBoardScreen(
                     }
                 }
                 Row {
-                    days.forEach { _ ->
-                        AttendanceBodyCell("", width = dayColumnWidth)
+                    days.forEach { day ->
+                        val dailyCount = rows.count { row ->
+                            val cell = row.cellsByDay[day]
+                            cell != null && (cell.isPresent || cell.totalWorkHours > 0.0)
+                        }
+                        AttendanceBodyCell(
+                            text = if (dailyCount > 0) "${dailyCount}人" else "",
+                            width = dayColumnWidth,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                     AttendanceBodyCell(
                         text = "${formatAttendanceNumber(totalHours)}h / ${formatAttendanceDayCount(totalDays)}天",
