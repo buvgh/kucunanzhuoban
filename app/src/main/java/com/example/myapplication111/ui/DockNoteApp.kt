@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Payments
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Save
 import android.widget.Toast
 import com.example.myapplication111.util.BackupManager
 import com.example.myapplication111.util.DatabaseMerger
@@ -822,6 +823,16 @@ fun DockNoteApp(viewModel: DockNoteViewModel) {
             onExportAll = {
                 coroutineScope.launch {
                     BackupManager.exportAndShareDatabase(context)
+                }
+            },
+            onSaveToLocal = { uri ->
+                coroutineScope.launch {
+                    val success = BackupManager.exportDatabaseToUri(context, uri)
+                    if (success) {
+                        Toast.makeText(context, "导出保存成功", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(context, "导出保存失败", Toast.LENGTH_SHORT).show()
+                    }
                 }
             },
             backups = BackupManager.getBackups(context)
@@ -4008,6 +4019,7 @@ private fun BackupManagementDialog(
     onRestore: (File) -> Unit,
     onRestoreFromUri: (Uri) -> Unit,
     onExportAll: () -> Unit,
+    onSaveToLocal: (Uri) -> Unit,
     backups: List<File>,
 ) {
     val context = LocalContext.current
@@ -4027,6 +4039,25 @@ private fun BackupManagementDialog(
                     Icon(Icons.Default.Share, null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("导出全部数据分享")
+                }
+                
+                Spacer(modifier = Modifier.height(12.dp))
+                
+                val saveFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri: Uri? ->
+                    uri?.let { onSaveToLocal(it) }
+                }
+                
+                OutlinedButton(
+                    onClick = { 
+                        val dateFormat = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.getDefault())
+                        saveFileLauncher.launch("库存记录备份_${dateFormat.format(java.util.Date())}.db") 
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(Icons.Default.Save, null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("导出保存到本地文件夹")
                 }
                 
                 Spacer(modifier = Modifier.height(16.dp))

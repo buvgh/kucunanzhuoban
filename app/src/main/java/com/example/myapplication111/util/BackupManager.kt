@@ -124,6 +124,25 @@ object BackupManager {
         }
     }
 
+    suspend fun exportDatabaseToUri(context: Context, destUri: Uri): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val dbFile = context.getDatabasePath(DB_NAME)
+            if (!dbFile.exists()) {
+                return@withContext false
+            }
+            val backupFile = backupDatabase(context, isExport = true) ?: return@withContext false
+            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
+                java.io.FileInputStream(backupFile).use { inputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error exporting to URI", e)
+            false
+        }
+    }
+
     private fun rotateBackups(backupDir: File) {
         val files = backupDir.listFiles { file -> file.name.startsWith("backup_") && file.name.endsWith(".db") }
             ?: return
